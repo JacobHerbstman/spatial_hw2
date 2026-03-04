@@ -1,4 +1,5 @@
 ecta200013-sup-0002-dataandprograms/
+CDP_codes_four_sectors/
 
 # OS files
 .DS_Store
@@ -18,6 +19,11 @@ tmp/
 .cache/
 *.log
 *.out
+tasks/*/output/*
+tasks/*/temp/*
+tasks/*/input/*
+!tasks/*/input/.gitkeep
+!tasks/*/output/.gitkeep
 
 # LaTeX artifacts
 *.aux
