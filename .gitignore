@@ -1,0 +1,27 @@
+ecta200013-sup-0002-dataandprograms/
+
+# OS files
+.DS_Store
+
+# Editors / IDEs
+.vscode/
+.idea/
+.Rproj.user/
+
+# Python / Julia / R caches
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# Build / temp / logs
+tmp/
+.cache/
+*.log
+*.out
+
+# LaTeX artifacts
+*.aux
+*.fdb_latexmk
+*.fls
+*.synctex.gz
+*.toc
