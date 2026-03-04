@@ -19,11 +19,11 @@ tmp/
 .cache/
 *.log
 *.out
-tasks/*/output/*
+**/output/**
+**/input/**
 tasks/*/temp/*
-tasks/*/input/*
-!tasks/*/input/.gitkeep
-!tasks/*/output/.gitkeep
+!**/input/.gitkeep
+!**/output/.gitkeep
 
 # LaTeX artifacts
 *.aux
