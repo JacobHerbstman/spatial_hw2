@@ -95,6 +95,30 @@ struct BaselinePath4
     profile::Symbol
 end
 
+struct CounterfactualShocks4
+    kappa_hat::Array{Float64,3}
+    lambda_hat::Array{Float64,3}
+end
+
+struct CounterfactualPath4
+    Ynew::Matrix{Float64}
+    mu_path::Array{Float64,3}
+    Ldyn::Array{Float64,3}
+    realwages::Array{Float64,3}
+    static_iterations::Vector{Int}
+    iterations::Int
+    converged::Bool
+    final_ymax::Float64
+    static_residuals::Vector{Float64}
+    outer_ymax::Vector{Float64}
+    outer_mean_static_iterations::Vector{Float64}
+    outer_max_static_iterations::Vector{Int}
+    outer_max_static_residual::Vector{Float64}
+    profile::Symbol
+    mu00_baseline::Matrix{Float64}
+    meta_shock_name::String
+end
+
 struct TempEqWorkspace
     LT::Vector{Float64}
     LT_mat::Matrix{Float64}
@@ -159,6 +183,39 @@ struct BaselineWorkspace4
     om_prev::Matrix{Float64}
     om_guesses::Array{Float64,3}
     om_init::Matrix{Float64}
+    outer_ymax::Vector{Float64}
+    outer_mean_static_iterations::Vector{Float64}
+    outer_max_static_iterations::Vector{Int}
+    outer_max_static_residual::Vector{Float64}
+    temp_ws::TempEqWorkspace
+end
+
+struct CounterfactualWorkspace4
+    hpow::Vector{Float64}
+    hpow_noshock_t1::Vector{Float64}
+    col_weights::Vector{Float64}
+    ratio_t1::Vector{Float64}
+    row_sums::Vector{Float64}
+    lvec::Vector{Float64}
+    lnext::Vector{Float64}
+    ytmp::Vector{Float64}
+    ynew::Matrix{Float64}
+    checky::Vector{Float64}
+    ljn_hat::Matrix{Float64}
+    kappa_hat::Matrix{Float64}
+    lambda_hat::Matrix{Float64}
+    snp::Vector{Float64}
+    om_prev::Matrix{Float64}
+    om_guesses::Array{Float64,3}
+    om_init::Matrix{Float64}
+    mu00::Matrix{Float64}
+    mu0_tilde::Matrix{Float64}
+    mu_path::Array{Float64,3}
+    special_num1::Matrix{Float64}
+    VARjn0::Matrix{Float64}
+    VALjn0::Matrix{Float64}
+    Din0::Matrix{Float64}
+    Sn0::Vector{Float64}
     outer_ymax::Vector{Float64}
     outer_mean_static_iterations::Vector{Float64}
     outer_max_static_iterations::Vector{Int}
@@ -245,6 +302,43 @@ function BaselineWorkspace4(base::BaseState4; time_horizon::Int = 200)
         ones(J, N),
         ones(J, N, time_horizon),
         ones(J, N),
+        Float64[],
+        Float64[],
+        Int[],
+        Float64[],
+        TempEqWorkspace(base),
+    )
+end
+
+function CounterfactualWorkspace4(base::BaseState4; time_horizon::Int = 200)
+    J, N, R = base.dims.J, base.dims.N, base.dims.R
+    RJ = R * J
+    CounterfactualWorkspace4(
+        zeros(RJ),
+        zeros(RJ),
+        zeros(RJ),
+        zeros(RJ),
+        zeros(RJ),
+        zeros(RJ),
+        zeros(RJ),
+        zeros(RJ),
+        zeros(RJ, time_horizon),
+        zeros(time_horizon),
+        ones(J, N),
+        ones(J * N, N),
+        ones(J, N),
+        zeros(N),
+        ones(J, N),
+        ones(J, N, time_horizon),
+        ones(J, N),
+        zeros(RJ, RJ),
+        zeros(RJ, RJ),
+        zeros(RJ, RJ, time_horizon),
+        zeros(RJ, RJ),
+        copy(base.VARjn00),
+        copy(base.VALjn00),
+        copy(base.Din00),
+        copy(base.Sn00),
         Float64[],
         Float64[],
         Int[],

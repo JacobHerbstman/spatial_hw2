@@ -1,0 +1,75 @@
+SHELL := bash
+include ../../shell_functions.make
+
+.PHONY: all smoke identity_reference identity_fast toy_reference toy_fast report report_smoke report_identity_fast report_identity_reference report_toy_fast report_toy_reference impact_report_toy_smoke_fast impact_report_toy_reference prepare_inputs
+
+all: identity_fast
+
+prepare_inputs: ../input/Base_year_four_sectors.mat ../input/baseline_4sector_path_reference.jld2 | ../output
+
+smoke: prepare_inputs ../input/counterfactual_4sector_path_fast_identity.jld2
+	@source ../../shell_functions.sh; VALIDATION_KIND=identity VALIDATION_MODE=smoke_identity SHOCK_INPUT_MODE=identity SHOCK_NAME=identity REL_TOL=5e-2 COUNTERFACTUAL_OUTPUT_FILE=../input/counterfactual_4sector_path_fast_identity.jld2 BASELINE_ANCHOR_FILE=../input/baseline_4sector_path_reference.jld2 RECORD_TRACE=1 MAX_ITER_DYNAMIC=5 MAX_ITER_STATIC=2000 USE_THREADS=1 THREADS_DYNAMIC=1 THREADS_STATIC=1 CONFIG_TAG=smoke Julia_pc_and_local --project=../../_lib/cdp_julia validate_counterfactual.jl
+
+identity_reference: prepare_inputs ../input/counterfactual_4sector_path_reference_identity.jld2
+	@source ../../shell_functions.sh; PROFILE=reference VALIDATION_KIND=identity VALIDATION_MODE=identity_reference SHOCK_INPUT_MODE=identity SHOCK_NAME=identity REL_TOL=1e-3 COUNTERFACTUAL_OUTPUT_FILE=../input/counterfactual_4sector_path_reference_identity.jld2 BASELINE_ANCHOR_FILE=../input/baseline_4sector_path_reference.jld2 RECORD_TRACE=1 MAX_ITER_DYNAMIC=1000 MAX_ITER_STATIC=2000 USE_THREADS=0 THREADS_DYNAMIC=0 THREADS_STATIC=0 CONFIG_TAG=identity_reference Julia_pc_and_local --project=../../_lib/cdp_julia validate_counterfactual.jl
+
+identity_fast: prepare_inputs ../input/counterfactual_4sector_path_fast_identity.jld2 ../input/counterfactual_4sector_path_reference_identity.jld2
+	@source ../../shell_functions.sh; PROFILE=fast VALIDATION_KIND=identity VALIDATION_MODE=identity_fast SHOCK_INPUT_MODE=identity SHOCK_NAME=identity REL_TOL=1e-3 FAST_REF_TOL=1e-4 COUNTERFACTUAL_OUTPUT_FILE=../input/counterfactual_4sector_path_fast_identity.jld2 REFERENCE_OUTPUT_FILE=../input/counterfactual_4sector_path_reference_identity.jld2 BASELINE_ANCHOR_FILE=../input/baseline_4sector_path_reference.jld2 RECORD_TRACE=1 MAX_ITER_DYNAMIC=1000 MAX_ITER_STATIC=2000 USE_THREADS=1 THREADS_DYNAMIC=1 THREADS_STATIC=1 CONFIG_TAG=identity_fast Julia_pc_and_local --project=../../_lib/cdp_julia validate_counterfactual.jl
+
+toy_reference: prepare_inputs ../input/counterfactual_4sector_path_reference_toy.jld2 ../input/counterfactual_4sector_path_reference_identity.jld2
+	@source ../../shell_functions.sh; PROFILE=reference VALIDATION_KIND=toy VALIDATION_MODE=toy_reference SHOCK_INPUT_MODE=toy SHOCK_NAME=toy REL_TOL=1e-3 COUNTERFACTUAL_OUTPUT_FILE=../input/counterfactual_4sector_path_reference_toy.jld2 IDENTITY_OUTPUT_FILE=../input/counterfactual_4sector_path_reference_identity.jld2 BASELINE_ANCHOR_FILE=../input/baseline_4sector_path_reference.jld2 RECORD_TRACE=1 MAX_ITER_DYNAMIC=1000 MAX_ITER_STATIC=2000 USE_THREADS=0 THREADS_DYNAMIC=0 THREADS_STATIC=0 CONFIG_TAG=toy_reference Julia_pc_and_local --project=../../_lib/cdp_julia validate_counterfactual.jl
+
+toy_fast: prepare_inputs ../input/counterfactual_4sector_path_fast_toy.jld2 ../input/counterfactual_4sector_path_reference_toy.jld2 ../input/counterfactual_4sector_path_fast_identity.jld2
+	@source ../../shell_functions.sh; PROFILE=fast VALIDATION_KIND=toy VALIDATION_MODE=toy_fast SHOCK_INPUT_MODE=toy SHOCK_NAME=toy REL_TOL=1e-3 FAST_REF_TOL=1e-4 COUNTERFACTUAL_OUTPUT_FILE=../input/counterfactual_4sector_path_fast_toy.jld2 IDENTITY_OUTPUT_FILE=../input/counterfactual_4sector_path_fast_identity.jld2 REFERENCE_OUTPUT_FILE=../input/counterfactual_4sector_path_reference_toy.jld2 BASELINE_ANCHOR_FILE=../input/baseline_4sector_path_reference.jld2 RECORD_TRACE=1 MAX_ITER_DYNAMIC=1000 MAX_ITER_STATIC=2000 USE_THREADS=1 THREADS_DYNAMIC=1 THREADS_STATIC=1 CONFIG_TAG=toy_fast Julia_pc_and_local --project=../../_lib/cdp_julia validate_counterfactual.jl
+
+report:
+	@mkdir -p ../temp/mpl
+	@MPLCONFIGDIR=../temp/mpl python3 make_dynamics_report.py --profile $${PROFILE:-fast} --shock $${SHOCK_NAME:-identity}
+
+report_smoke:
+	@PROFILE=fast SHOCK_NAME=identity $(MAKE) report
+
+report_identity_fast:
+	@PROFILE=fast SHOCK_NAME=identity $(MAKE) report
+
+report_identity_reference:
+	@PROFILE=reference SHOCK_NAME=identity $(MAKE) report
+
+report_toy_fast:
+	@PROFILE=fast SHOCK_NAME=toy $(MAKE) report
+
+report_toy_reference:
+	@PROFILE=reference SHOCK_NAME=toy $(MAKE) report
+
+impact_report_toy_smoke_fast: ../input/counterfactual_4sector_path_fast_identity.jld2 ../input/counterfactual_4sector_path_fast_toy_smoke.jld2
+	@source ../../shell_functions.sh; PROFILE_TAG=fast SHOCK_NAME=toy_smoke IDENTITY_OUTPUT_FILE=../input/counterfactual_4sector_path_fast_identity.jld2 SHOCK_OUTPUT_FILE=../input/counterfactual_4sector_path_fast_toy_smoke.jld2 OUTPUT_DIR=../output SHOCK_SECTOR=1 SHOCK_REGION=1 Julia_pc_and_local --project=../../_lib/cdp_julia extract_key_economic_series.jl
+	@mkdir -p ../temp/mpl
+	@MPLCONFIGDIR=../temp/mpl python3 make_key_econ_report.py --profile fast --shock toy_smoke --input-dir ../output --output-dir ../output
+
+impact_report_toy_reference: ../input/counterfactual_4sector_path_reference_identity.jld2 ../input/counterfactual_4sector_path_reference_toy.jld2 ../input/Base_year_four_sectors.mat
+	@source ../../shell_functions.sh; PROFILE_TAG=reference SHOCK_NAME=toy SHOCK_INPUT_MODE=toy IDENTITY_OUTPUT_FILE=../input/counterfactual_4sector_path_reference_identity.jld2 SHOCK_OUTPUT_FILE=../input/counterfactual_4sector_path_reference_toy.jld2 BASE_STATE_MAT=../input/Base_year_four_sectors.mat OUTPUT_DIR=../output SHOCK_SECTOR=1 SHOCK_REGION=1 TOY_SECTOR=1 TOY_REGION=1 TOY_PERIODS=20 TOY_LAMBDA_MULTIPLIER=1.05 MAX_ITER_STATIC=2000 Julia_pc_and_local --project=../../_lib/cdp_julia extract_key_economic_series.jl
+	@mkdir -p ../temp/mpl
+	@MPLCONFIGDIR=../temp/mpl python3 make_key_econ_report.py --profile reference --shock toy --input-dir ../output --output-dir ../output
+
+../input/counterfactual_4sector_path_reference_identity.jld2: ../../cdp4_counterfactual_dynamics/output/counterfactual_4sector_path_reference_identity.jld2 | ../input
+	ln -sf $< $@
+
+../input/counterfactual_4sector_path_fast_identity.jld2: ../../cdp4_counterfactual_dynamics/output/counterfactual_4sector_path_fast_identity.jld2 | ../input
+	ln -sf $< $@
+
+../input/counterfactual_4sector_path_reference_toy.jld2: ../../cdp4_counterfactual_dynamics/output/counterfactual_4sector_path_reference_toy.jld2 | ../input
+	ln -sf $< $@
+
+../input/counterfactual_4sector_path_fast_toy.jld2: ../../cdp4_counterfactual_dynamics/output/counterfactual_4sector_path_fast_toy.jld2 | ../input
+	ln -sf $< $@
+
+../input/counterfactual_4sector_path_fast_toy_smoke.jld2: ../../cdp4_counterfactual_dynamics/output/counterfactual_4sector_path_fast_toy_smoke.jld2 | ../input
+	ln -sf $< $@
+
+../input/Base_year_four_sectors.mat: ../../../CDP_codes_four_sectors/Base_year_four_sectors.mat | ../input
+	ln -sf $< $@
+
+../input/baseline_4sector_path_reference.jld2: ../../cdp4_baseline_dynamics/output/baseline_4sector_path_reference.jld2 | ../input
+	ln -sf $< $@
+
+include ../../generic.make

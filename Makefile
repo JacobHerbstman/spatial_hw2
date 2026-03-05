@@ -1,6 +1,6 @@
 SHELL := bash
 
-.PHONY: all tasks smoke_pipeline setup baseline_solver baseline_dynamics baseline_dynamics_smoke baseline_dynamics_reference baseline_dynamics_fast validate validate_smoke validate_reference validate_fast check clean
+.PHONY: all tasks smoke_pipeline setup baseline_solver baseline_dynamics baseline_dynamics_smoke baseline_dynamics_reference baseline_dynamics_fast validate validate_smoke validate_reference validate_fast counterfactual_smoke counterfactual_toy_smoke counterfactual_identity_reference counterfactual_identity_fast counterfactual_toy_reference counterfactual_toy_fast counterfactual_validate_identity_reference counterfactual_validate_identity_fast counterfactual_validate_toy_reference counterfactual_validate_toy_fast counterfactual_report_smoke counterfactual_report_identity_fast counterfactual_report_identity_reference counterfactual_report_toy_fast counterfactual_report_toy_reference counterfactual_impact_report_toy_smoke_fast counterfactual_impact_report_toy_reference check clean
 
 all: tasks
 
@@ -37,6 +37,57 @@ validate_reference:
 
 validate_fast:
 	$(MAKE) -C tasks/cdp4_baseline_validate/code replication_fast
+
+counterfactual_smoke:
+	$(MAKE) -C tasks/cdp4_counterfactual_dynamics/code smoke
+
+counterfactual_toy_smoke:
+	$(MAKE) -C tasks/cdp4_counterfactual_dynamics/code toy_smoke
+
+counterfactual_identity_reference:
+	$(MAKE) -C tasks/cdp4_counterfactual_dynamics/code identity_reference
+
+counterfactual_identity_fast:
+	$(MAKE) -C tasks/cdp4_counterfactual_dynamics/code identity_fast
+
+counterfactual_toy_reference:
+	$(MAKE) -C tasks/cdp4_counterfactual_dynamics/code toy_reference
+
+counterfactual_toy_fast:
+	$(MAKE) -C tasks/cdp4_counterfactual_dynamics/code toy_fast
+
+counterfactual_validate_identity_reference:
+	$(MAKE) -C tasks/cdp4_counterfactual_validate/code identity_reference
+
+counterfactual_validate_identity_fast:
+	$(MAKE) -C tasks/cdp4_counterfactual_validate/code identity_fast
+
+counterfactual_validate_toy_reference:
+	$(MAKE) -C tasks/cdp4_counterfactual_validate/code toy_reference
+
+counterfactual_validate_toy_fast:
+	$(MAKE) -C tasks/cdp4_counterfactual_validate/code toy_fast
+
+counterfactual_report_smoke:
+	$(MAKE) -C tasks/cdp4_counterfactual_validate/code report_smoke
+
+counterfactual_report_identity_fast:
+	$(MAKE) -C tasks/cdp4_counterfactual_validate/code report_identity_fast
+
+counterfactual_report_identity_reference:
+	$(MAKE) -C tasks/cdp4_counterfactual_validate/code report_identity_reference
+
+counterfactual_report_toy_fast:
+	$(MAKE) -C tasks/cdp4_counterfactual_validate/code report_toy_fast
+
+counterfactual_report_toy_reference:
+	$(MAKE) -C tasks/cdp4_counterfactual_validate/code report_toy_reference
+
+counterfactual_impact_report_toy_smoke_fast:
+	$(MAKE) -C tasks/cdp4_counterfactual_validate/code impact_report_toy_smoke_fast
+
+counterfactual_impact_report_toy_reference:
+	$(MAKE) -C tasks/cdp4_counterfactual_validate/code impact_report_toy_reference
 
 check:
 	@echo "Pipeline: setup -> baseline_solver -> baseline_dynamics -> validate"
