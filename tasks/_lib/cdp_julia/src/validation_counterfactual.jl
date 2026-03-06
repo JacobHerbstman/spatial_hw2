@@ -50,9 +50,10 @@ end
 
 function validate_counterfactual_identity_4sector(path::CounterfactualPath4,
                                                   baseline_anchor_y::Matrix{Float64};
+                                                  dyn_tol::Float64 = 1e-3,
                                                   rel_tol::Float64 = 1e-3,
                                                   mode_label::AbstractString = "identity")
-    core = validate_counterfactual_core_4sector(path; dyn_tol = rel_tol, mode_label = mode_label)
+    core = validate_counterfactual_core_4sector(path; dyn_tol = dyn_tol, mode_label = mode_label)
     rows = _cf_rows()
 
     ynew_abs = maximum(abs.(path.Ynew .- baseline_anchor_y))

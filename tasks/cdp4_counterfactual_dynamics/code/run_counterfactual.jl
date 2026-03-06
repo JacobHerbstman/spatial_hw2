@@ -83,6 +83,7 @@ base = load_base_state_4sector("../input/Base_year_four_sectors.mat")
 time_horizon = parse(Int, get(ENV, "TIME_HORIZON", "200"))
 max_iter_dynamic = parse(Int, get(ENV, "MAX_ITER_DYNAMIC", "1000"))
 max_iter_static = parse(Int, get(ENV, "MAX_ITER_STATIC", "2000"))
+tol_dynamic = parse(Float64, get(ENV, "TOL_DYNAMIC", "1e-5"))
 use_threads = _env_bool("USE_THREADS", false)
 threads_dynamic = _env_bool("THREADS_DYNAMIC", false)
 threads_static = _env_bool("THREADS_STATIC", false)
@@ -97,7 +98,7 @@ baseline_anchor_y = load_baseline_anchor_y(baseline_anchor_file)
 
 params = default_model_params(
     base;
-    tol_dynamic = 1e-3,
+    tol_dynamic = tol_dynamic,
     max_iter_dynamic = max_iter_dynamic,
     max_iter_static = max_iter_static,
     use_threads = use_threads,

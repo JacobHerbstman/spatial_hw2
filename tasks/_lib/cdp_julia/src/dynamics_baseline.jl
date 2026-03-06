@@ -50,6 +50,116 @@ function _run_profile(params::ModelParams, profile_override::Union{Nothing, Symb
     _check_profile(profile_override)
 end
 
+function _anderson_reset!(acc::AndersonAccelerator)
+    acc.k = 0
+    acc
+end
+
+function _anderson_simple_step!(acc::AndersonAccelerator, x_vec::AbstractVector{Float64})
+    @inbounds for i in 1:acc.n
+        x_vec[i] = x_vec[i] + acc.beta * acc.f_curr[i]
+    end
+    x_vec
+end
+
+function _relax_hvect!(hvect::Matrix{Float64}, ynew::Matrix{Float64}, relax::Float64)
+    keep = 1.0 - relax
+    @inbounds for i in eachindex(hvect)
+        hvect[i] = relax * ynew[i] + keep * hvect[i]
+    end
+    hvect
+end
+
+function _anderson_update!(acc::AndersonAccelerator, x::Matrix{Float64}, g::Matrix{Float64})
+    if length(x) != acc.n || length(g) != acc.n
+        error("Anderson state size mismatch: expected n=$(acc.n), got $(length(x)) and $(length(g)).")
+    end
+
+    x_vec = vec(x)
+    g_vec = vec(g)
+
+    @inbounds for i in 1:acc.n
+        acc.f_curr[i] = g_vec[i] - x_vec[i]
+    end
+
+    acc.k += 1
+    col = mod1(acc.k, acc.m)
+    @views acc.x_hist[:, col] .= x_vec
+    @views acc.f_hist[:, col] .= acc.f_curr
+
+    if acc.k <= acc.m
+        _anderson_simple_step!(acc, x_vec)
+        return false
+    end
+
+    k_eff = min(acc.k, acc.m)
+    start_iter = acc.k - k_eff + 1
+    @inbounds for j in 1:k_eff
+        acc.active_cols[j] = mod1(start_iter + j - 1, acc.m)
+    end
+
+    p = k_eff + 1
+    K = acc.kkt
+    rhs = acc.rhs
+    sol = acc.sol
+
+    @inbounds begin
+        for i in 1:p, j in 1:p
+            K[i, j] = 0.0
+        end
+        for i in 1:k_eff
+            ci = acc.active_cols[i]
+            for j in i:k_eff
+                cj = acc.active_cols[j]
+                s = 0.0
+                for t in 1:acc.n
+                    s += acc.f_hist[t, ci] * acc.f_hist[t, cj]
+                end
+                if i == j
+                    s += acc.ridge
+                end
+                K[i, j] = s
+                K[j, i] = s
+            end
+            K[i, p] = 1.0
+            K[p, i] = 1.0
+            rhs[i] = 0.0
+        end
+        K[p, p] = 0.0
+        rhs[p] = 1.0
+    end
+
+    solve_ok = true
+    try
+        sol[1:p] .= K[1:p, 1:p] \ rhs[1:p]
+    catch
+        solve_ok = false
+    end
+
+    if !solve_ok
+        _anderson_simple_step!(acc, x_vec)
+        return false
+    end
+
+    @inbounds for i in 1:acc.n
+        v = 0.0
+        for j in 1:k_eff
+            cj = acc.active_cols[j]
+            αj = sol[j]
+            v += αj * (acc.x_hist[i, cj] + acc.beta * acc.f_hist[i, cj])
+        end
+        acc.x_next[i] = v
+    end
+
+    if !all(isfinite, acc.x_next)
+        _anderson_simple_step!(acc, x_vec)
+        return false
+    end
+
+    x_vec .= acc.x_next
+    true
+end
+
 function run_baseline_4sector(base::BaseState4, params::ModelParams; time_horizon::Int = 200,
                               y_init::Union{Nothing, Matrix{Float64}} = nothing,
                               workspace::Union{Nothing, BaselineWorkspace4} = nothing,
@@ -59,11 +169,15 @@ function run_baseline_4sector(base::BaseState4, params::ModelParams; time_horizo
     RJ = R * J
     profile = _run_profile(params, profile_override)
     dynamic_threaded = (profile == :reference) ? false : (params.use_threads && params.threads_dynamic)
-    warm_start_static = (profile == :reference) ? false : params.warm_start_static
-    reset_price_guess = (profile == :reference)
+    warm_start_static = false
+    reset_price_guess = true
     hvect_relax = 0.5
+    use_anderson = false
 
     Hvect = isnothing(y_init) ? ones(RJ, time_horizon) : copy(y_init)
+    if size(Hvect) != (RJ, time_horizon)
+        error("y_init has size $(size(Hvect)); expected ($(RJ), $(time_horizon)).")
+    end
     mu_path = zeros(RJ, RJ, time_horizon)
     Ldyn = zeros(J, R, time_horizon)
     realwages = ones(J, N, time_horizon)
@@ -84,6 +198,8 @@ function run_baseline_4sector(base::BaseState4, params::ModelParams; time_horizo
     fill!(ws.om_prev, 1.0)
     fill!(ws.om_guesses, 1.0)
     fill!(ws.om_init, 1.0)
+    acc = AndersonAccelerator(RJ * time_horizon; m = 5, beta = hvect_relax, ridge = 1e-10)
+    _anderson_reset!(acc)
 
     Ynew_last = copy(Hvect)
     converged = false
@@ -147,11 +263,7 @@ function run_baseline_4sector(base::BaseState4, params::ModelParams; time_horizo
             end
 
             if warm_start_static
-                if t == 1
-                    @views ws.om_init .= ws.om_guesses[:, :, t]
-                else
-                    ws.om_init .= ws.om_prev
-                end
+                @views ws.om_init .= ws.om_guesses[:, :, t]
             else
                 fill!(ws.om_init, 1.0)
             end
@@ -176,7 +288,6 @@ function run_baseline_4sector(base::BaseState4, params::ModelParams; time_horizo
             Sn .= temp.Sn
             Din .= temp.Din
             if warm_start_static
-                ws.om_prev .= temp.om
                 @views ws.om_guesses[:, :, t] .= temp.om
             end
 
@@ -227,13 +338,13 @@ function run_baseline_4sector(base::BaseState4, params::ModelParams; time_horizo
         push!(ws.outer_max_static_iterations, maximum(static_iterations[t_rng]))
         push!(ws.outer_max_static_residual, maximum(static_residuals[t_rng]))
 
-        @inbounds for t in 1:time_horizon, i in 1:RJ
-            Hvect[i, t] = hvect_relax * ws.ynew[i, t] + (1.0 - hvect_relax) * Hvect[i, t]
-        end
-
         if Ymax <= params.tol_dynamic
             converged = true
             break
+        elseif use_anderson
+            _anderson_update!(acc, Hvect, ws.ynew)
+        else
+            _relax_hvect!(Hvect, ws.ynew, hvect_relax)
         end
 
         iter += 1

@@ -28,6 +28,7 @@ mode_label_default = profile == :reference ? "replication_reference" : "replicat
 mode_label = get(ENV, "VALIDATION_MODE", mode_label_default)
 baseline_path_file = get(ENV, "BASELINE_OUTPUT_FILE", "../input/baseline_4sector_path.jld2")
 rel_tol = parse(Float64, get(ENV, "REL_TOL", "1e-6"))
+tol_dynamic = parse(Float64, get(ENV, "TOL_DYNAMIC", "1e-5"))
 
 jld = load(baseline_path_file)
 path = jld["path"]
@@ -54,7 +55,7 @@ validate_stats = @timed begin
     base = load_base_state_4sector("../input/Base_year_four_sectors.mat")
     params = default_model_params(
         base;
-        tol_dynamic = 1e-3,
+        tol_dynamic = tol_dynamic,
         max_iter_dynamic = max_iter_dynamic,
         max_iter_static = max_iter_static,
         use_threads = use_threads,

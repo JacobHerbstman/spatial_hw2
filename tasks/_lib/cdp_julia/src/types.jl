@@ -15,7 +15,7 @@ Base.@kwdef struct ModelParams
     beta::Float64 = 0.99
     nu::Float64 = 5.3436
     tol_static::Float64 = 1e-7
-    tol_dynamic::Float64 = 1e-3
+    tol_dynamic::Float64 = 1e-5
     max_iter_static::Int = 2000
     max_iter_dynamic::Int = 1000
     vfactor::Float64 = -0.05
@@ -117,6 +117,46 @@ struct CounterfactualPath4
     profile::Symbol
     mu00_baseline::Matrix{Float64}
     meta_shock_name::String
+end
+
+mutable struct AndersonAccelerator
+    m::Int
+    beta::Float64
+    ridge::Float64
+    n::Int
+    k::Int
+    x_hist::Matrix{Float64}
+    f_hist::Matrix{Float64}
+    f_curr::Vector{Float64}
+    x_next::Vector{Float64}
+    active_cols::Vector{Int}
+    kkt::Matrix{Float64}
+    rhs::Vector{Float64}
+    sol::Vector{Float64}
+end
+
+function AndersonAccelerator(n::Int; m::Int = 5, beta::Float64 = 0.5, ridge::Float64 = 1e-10)
+    if n <= 0
+        error("AndersonAccelerator requires n > 0, got n=$(n)")
+    end
+    if m < 1
+        error("AndersonAccelerator requires m >= 1, got m=$(m)")
+    end
+    AndersonAccelerator(
+        m,
+        beta,
+        ridge,
+        n,
+        0,
+        zeros(n, m),
+        zeros(n, m),
+        zeros(n),
+        zeros(n),
+        zeros(Int, m),
+        zeros(m + 1, m + 1),
+        zeros(m + 1),
+        zeros(m + 1),
+    )
 end
 
 struct TempEqWorkspace
@@ -347,9 +387,11 @@ function CounterfactualWorkspace4(base::BaseState4; time_horizon::Int = 200)
     )
 end
 
-function default_model_params(base::BaseState4; tol_dynamic::Float64 = 1e-3,
+function default_model_params(base::BaseState4; tol_static::Float64 = 1e-7,
+                              tol_dynamic::Float64 = 1e-5,
                               max_iter_dynamic::Int = 1000,
                               max_iter_static::Int = 2000,
+                              vfactor::Float64 = -0.05,
                               use_threads::Bool = false,
                               threads_dynamic::Bool = false,
                               threads_static::Bool = false,
@@ -361,11 +403,11 @@ function default_model_params(base::BaseState4; tol_dynamic::Float64 = 1e-3,
     ModelParams(
         beta = 0.99,
         nu = 5.3436,
-        tol_static = base.tol,
+        tol_static = tol_static,
         tol_dynamic = tol_dynamic,
         max_iter_static = max_iter_static,
         max_iter_dynamic = max_iter_dynamic,
-        vfactor = base.vfactor,
+        vfactor = vfactor,
         use_threads = use_threads,
         threads_dynamic = threads_dynamic,
         threads_static = threads_static,

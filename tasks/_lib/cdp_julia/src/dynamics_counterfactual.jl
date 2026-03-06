@@ -106,11 +106,16 @@ function run_counterfactual_4sector(base::BaseState4, params::ModelParams;
 
     profile = _run_profile(params, profile_override)
     dynamic_threaded = (profile == :reference) ? false : (params.use_threads && params.threads_dynamic)
-    warm_start_static = (profile == :reference) ? false : params.warm_start_static
-    reset_price_guess = (profile == :reference)
+    warm_start_static = false
+    reset_price_guess = true
     hvect_relax = 0.5
+    use_anderson = false
 
-    Hvect = isnothing(y_init) ? ones(RJ, time_horizon) : copy(y_init)
+    Hvect = if !isnothing(y_init)
+        copy(y_init)
+    else
+        copy(baseline_anchor_y)
+    end
     if size(Hvect) != (RJ, time_horizon)
         error("y_init has size $(size(Hvect)); expected ($(RJ), $(time_horizon)).")
     end
@@ -135,6 +140,8 @@ function run_counterfactual_4sector(base::BaseState4, params::ModelParams;
     fill!(ws.om_prev, 1.0)
     fill!(ws.om_guesses, 1.0)
     fill!(ws.om_init, 1.0)
+    acc = AndersonAccelerator(RJ * time_horizon; m = 5, beta = hvect_relax, ridge = 1e-10)
+    _anderson_reset!(acc)
 
     _fill_col_weights!(ws.col_weights, baseline_anchor_y, 2, params.beta)
     ws.hpow_noshock_t1 .= ws.col_weights
@@ -207,11 +214,7 @@ function run_counterfactual_4sector(base::BaseState4, params::ModelParams;
             ws.lambda_hat .= view(shocks.lambda_hat, :, :, t)
 
             if warm_start_static
-                if t == 1
-                    @views ws.om_init .= ws.om_guesses[:, :, t]
-                else
-                    ws.om_init .= ws.om_prev
-                end
+                @views ws.om_init .= ws.om_guesses[:, :, t]
             else
                 fill!(ws.om_init, 1.0)
             end
@@ -236,7 +239,6 @@ function run_counterfactual_4sector(base::BaseState4, params::ModelParams;
             ws.Sn0 .= temp.Sn
             ws.Din0 .= temp.Din
             if warm_start_static
-                ws.om_prev .= temp.om
                 @views ws.om_guesses[:, :, t] .= temp.om
             end
 
@@ -286,13 +288,13 @@ function run_counterfactual_4sector(base::BaseState4, params::ModelParams;
         push!(ws.outer_max_static_iterations, maximum(static_iterations[t_rng]))
         push!(ws.outer_max_static_residual, maximum(static_residuals[t_rng]))
 
-        @inbounds for t in 1:time_horizon, i in 1:RJ
-            Hvect[i, t] = hvect_relax * ws.ynew[i, t] + (1.0 - hvect_relax) * Hvect[i, t]
-        end
-
         if Ymax <= params.tol_dynamic
             converged = true
             break
+        elseif use_anderson
+            _anderson_update!(acc, Hvect, ws.ynew)
+        else
+            _relax_hvect!(Hvect, ws.ynew, hvect_relax)
         end
 
         iter += 1

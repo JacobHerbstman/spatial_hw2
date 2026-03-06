@@ -98,7 +98,7 @@ function _sum_rows_col(M::AbstractMatrix{Float64}, rows::Vector{Int}, col::Int)
     s
 end
 
-function _sum_rows_all_cols(M::AbstractMatrix{Float64}, rows::UnitRange{Int})
+function _sum_rows_all_cols(M::AbstractMatrix{Float64}, rows)
     s = 0.0
     @inbounds for r in rows, c in axes(M, 2)
         s += M[r, c]
@@ -135,7 +135,7 @@ function _replay_trade_series(base::BaseState4, path, shocks::CounterfactualShoc
     params_static = ModelParams(
         tol_static = 1e-7,
         max_iter_static = max_iter_static,
-        vfactor = base.vfactor,
+        vfactor = -0.05,
         use_threads = false,
         threads_dynamic = false,
         threads_static = false,
@@ -187,6 +187,7 @@ function _replay_trade_series(base::BaseState4, path, shocks::CounterfactualShoc
 
         ex_cell = _sum_row(temp.xbilat, idx_trade)
         ex_domestic = temp.xbilat[idx_trade, shock_region]
+        ex_region = _sum_rows_all_cols(temp.xbilat, region_rows)
         im_region = _sum_col(temp.xbilat, shock_region)
         im_domestic = _sum_rows_col(temp.xbilat, region_rows, shock_region)
 
@@ -197,7 +198,7 @@ function _replay_trade_series(base::BaseState4, path, shocks::CounterfactualShoc
         domestic_import_share_region[tt] = _safe_ratio(im_domestic, im_region)
         cell_import_share_region[tt] = temp.Din[idx_trade, shock_region]
         sector_exports_total[tt] = _sum_rows_all_cols(temp.xbilat, sector_rows)
-        trade_balance_region[tt] = temp.Sn[shock_region]
+        trade_balance_region[tt] = ex_region - im_region
     end
 
     DataFrame(

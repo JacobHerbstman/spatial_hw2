@@ -19,7 +19,9 @@ tmp/
 .cache/
 *.log
 *.out
+**/output/
 **/output/**
+**/input/
 **/input/**
 tasks/*/temp/*
 !**/input/.gitkeep
