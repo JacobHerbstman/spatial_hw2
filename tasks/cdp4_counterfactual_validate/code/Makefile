@@ -1,7 +1,7 @@
 SHELL := bash
 include ../../shell_functions.make
 
-.PHONY: all smoke identity_reference identity_fast toy_reference toy_fast report report_smoke report_identity_fast report_identity_reference report_toy_fast report_toy_reference impact_report_toy_smoke_fast impact_report_toy_reference prepare_inputs
+.PHONY: all smoke identity_reference identity_fast toy_reference toy_fast report report_smoke report_identity_fast report_identity_reference report_toy_fast report_toy_reference impact_report_toy_smoke_fast impact_report_toy_reference state_maps state_maps_toy_reference state_maps_toy_fast state_maps_toy_smoke_fast prepare_inputs
 
 all: identity_fast
 
@@ -50,6 +50,20 @@ impact_report_toy_reference: ../input/counterfactual_4sector_path_reference_iden
 	@source ../../shell_functions.sh; PROFILE_TAG=reference SHOCK_NAME=toy SHOCK_INPUT_MODE=toy IDENTITY_OUTPUT_FILE=../input/counterfactual_4sector_path_reference_identity.jld2 SHOCK_OUTPUT_FILE=../input/counterfactual_4sector_path_reference_toy.jld2 BASE_STATE_MAT=../input/Base_year_four_sectors.mat OUTPUT_DIR=../output SHOCK_SECTOR=1 SHOCK_REGION=1 TOY_SECTOR=1 TOY_REGION=1 TOY_PERIODS=20 TOY_LAMBDA_MULTIPLIER=1.05 MAX_ITER_STATIC=2000 Julia_pc_and_local --project=../../_lib/cdp_julia extract_key_economic_series.jl
 	@mkdir -p ../temp/mpl
 	@MPLCONFIGDIR=../temp/mpl python3 make_key_econ_report.py --profile reference --shock toy --input-dir ../output --output-dir ../output
+
+state_maps:
+	@source ../../shell_functions.sh; PROFILE_TAG=$${PROFILE_TAG:-$${PROFILE:-fast}} SHOCK_NAME=$${SHOCK_NAME:-toy} IDENTITY_OUTPUT_FILE=$${IDENTITY_OUTPUT_FILE:-../input/counterfactual_4sector_path_$${PROFILE_TAG:-$${PROFILE:-fast}}_identity.jld2} SHOCK_OUTPUT_FILE=$${SHOCK_OUTPUT_FILE:-../input/counterfactual_4sector_path_$${PROFILE_TAG:-$${PROFILE:-fast}}_$${SHOCK_NAME:-toy}.jld2} OUTPUT_DIR=$${OUTPUT_DIR:-../output} Julia_pc_and_local --project=../../_lib/cdp_julia extract_state_maps_data.jl
+	@mkdir -p ../temp/mpl
+	@MAP_ARGS="--renderer $${MAP_RENDERER:-auto}"; if [ -n "$${STATE_GEOMETRY_FILE:-}" ]; then MAP_ARGS="$$MAP_ARGS --geometry-file $$STATE_GEOMETRY_FILE"; fi; MPLCONFIGDIR=../temp/mpl python3 make_state_maps.py --profile $${PROFILE_TAG:-$${PROFILE:-fast}} --shock $${SHOCK_NAME:-toy} --input-dir $${OUTPUT_DIR:-../output} --output-dir $${OUTPUT_DIR:-../output} $$MAP_ARGS
+
+state_maps_toy_reference: ../input/counterfactual_4sector_path_reference_identity.jld2 ../input/counterfactual_4sector_path_reference_toy.jld2
+	@PROFILE_TAG=reference SHOCK_NAME=toy IDENTITY_OUTPUT_FILE=../input/counterfactual_4sector_path_reference_identity.jld2 SHOCK_OUTPUT_FILE=../input/counterfactual_4sector_path_reference_toy.jld2 OUTPUT_DIR=../output $(MAKE) state_maps
+
+state_maps_toy_fast: ../input/counterfactual_4sector_path_fast_identity.jld2 ../input/counterfactual_4sector_path_fast_toy.jld2
+	@PROFILE_TAG=fast SHOCK_NAME=toy IDENTITY_OUTPUT_FILE=../input/counterfactual_4sector_path_fast_identity.jld2 SHOCK_OUTPUT_FILE=../input/counterfactual_4sector_path_fast_toy.jld2 OUTPUT_DIR=../output $(MAKE) state_maps
+
+state_maps_toy_smoke_fast: ../input/counterfactual_4sector_path_fast_identity.jld2 ../input/counterfactual_4sector_path_fast_toy_smoke.jld2
+	@PROFILE_TAG=fast SHOCK_NAME=toy_smoke IDENTITY_OUTPUT_FILE=../input/counterfactual_4sector_path_fast_identity.jld2 SHOCK_OUTPUT_FILE=../input/counterfactual_4sector_path_fast_toy_smoke.jld2 OUTPUT_DIR=../output $(MAKE) state_maps
 
 ../input/counterfactual_4sector_path_reference_identity.jld2: ../../cdp4_counterfactual_dynamics/output/counterfactual_4sector_path_reference_identity.jld2 | ../input
 	ln -sf $< $@
