@@ -70,6 +70,25 @@ function _relax_hvect!(hvect::Matrix{Float64}, ynew::Matrix{Float64}, relax::Flo
     hvect
 end
 
+function _write_outer_trace(trace_path::Union{Nothing, AbstractString},
+                            outer_ymax::Vector{Float64},
+                            outer_mean_static_iterations::Vector{Float64},
+                            outer_max_static_iterations::Vector{Int},
+                            outer_max_static_residual::Vector{Float64})
+    if isnothing(trace_path)
+        return nothing
+    end
+    trace_df = DataFrame(
+        outer_iter = collect(1:length(outer_ymax)),
+        Ymax = outer_ymax,
+        mean_static_iterations = outer_mean_static_iterations,
+        max_static_iterations = outer_max_static_iterations,
+        max_static_residual = outer_max_static_residual,
+    )
+    CSV.write(trace_path, trace_df)
+    nothing
+end
+
 function _anderson_update!(acc::AndersonAccelerator, x::Matrix{Float64}, g::Matrix{Float64})
     if length(x) != acc.n || length(g) != acc.n
         error("Anderson state size mismatch: expected n=$(acc.n), got $(length(x)) and $(length(g)).")
@@ -169,10 +188,10 @@ function run_baseline_4sector(base::BaseState4, params::ModelParams; time_horizo
     RJ = R * J
     profile = _run_profile(params, profile_override)
     dynamic_threaded = (profile == :reference) ? false : (params.use_threads && params.threads_dynamic)
-    warm_start_static = false
+    warm_start_static = params.warm_start_static
     reset_price_guess = true
-    hvect_relax = 0.5
-    use_anderson = false
+    hvect_relax = params.hvect_relax
+    use_anderson = params.use_anderson
 
     Hvect = isnothing(y_init) ? ones(RJ, time_horizon) : copy(y_init)
     if size(Hvect) != (RJ, time_horizon)
@@ -337,6 +356,15 @@ function run_baseline_4sector(base::BaseState4, params::ModelParams; time_horizo
         push!(ws.outer_mean_static_iterations, mean(static_iterations[t_rng]))
         push!(ws.outer_max_static_iterations, maximum(static_iterations[t_rng]))
         push!(ws.outer_max_static_residual, maximum(static_residuals[t_rng]))
+        if params.record_trace
+            _write_outer_trace(
+                trace_path,
+                ws.outer_ymax,
+                ws.outer_mean_static_iterations,
+                ws.outer_max_static_iterations,
+                ws.outer_max_static_residual,
+            )
+        end
 
         if Ymax <= params.tol_dynamic
             converged = true
@@ -352,15 +380,14 @@ function run_baseline_4sector(base::BaseState4, params::ModelParams; time_horizo
 
     actual_iters = converged ? iter : min(iter - 1, params.max_iter_dynamic)
 
-    if !isnothing(trace_path) && params.record_trace
-        trace_df = DataFrame(
-            outer_iter = collect(1:length(ws.outer_ymax)),
-            Ymax = ws.outer_ymax,
-            mean_static_iterations = ws.outer_mean_static_iterations,
-            max_static_iterations = ws.outer_max_static_iterations,
-            max_static_residual = ws.outer_max_static_residual,
+    if params.record_trace
+        _write_outer_trace(
+            trace_path,
+            ws.outer_ymax,
+            ws.outer_mean_static_iterations,
+            ws.outer_max_static_iterations,
+            ws.outer_max_static_residual,
         )
-        CSV.write(trace_path, trace_df)
     end
 
     BaselinePath4(

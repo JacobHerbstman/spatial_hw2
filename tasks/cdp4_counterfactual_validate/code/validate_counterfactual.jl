@@ -140,6 +140,8 @@ threads_dynamic = _env_bool("THREADS_DYNAMIC", false)
 threads_static = _env_bool("THREADS_STATIC", false)
 record_trace = _env_bool("RECORD_TRACE", true)
 warm_start_static = _env_optional_bool("WARM_START_STATIC")
+use_anderson = _env_optional_bool("USE_ANDERSON")
+hvect_relax = parse(Float64, get(ENV, "HVECT_RELAX", "0.5"))
 
 validate_stats = @timed begin
     if validation_kind == "identity"
@@ -186,6 +188,8 @@ validate_stats = @timed begin
         threads_static = threads_static,
         profile = profile,
         warm_start_static = warm_start_static,
+        use_anderson = use_anderson,
+        hvect_relax = hvect_relax,
         record_trace = record_trace,
     )
     rerun_trace_path = "../output/outer_trace_counterfactual_4sector_validate_rerun.csv"

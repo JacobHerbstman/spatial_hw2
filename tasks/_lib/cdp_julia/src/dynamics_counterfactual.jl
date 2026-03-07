@@ -106,10 +106,10 @@ function run_counterfactual_4sector(base::BaseState4, params::ModelParams;
 
     profile = _run_profile(params, profile_override)
     dynamic_threaded = (profile == :reference) ? false : (params.use_threads && params.threads_dynamic)
-    warm_start_static = false
+    warm_start_static = params.warm_start_static
     reset_price_guess = true
-    hvect_relax = 0.5
-    use_anderson = false
+    hvect_relax = params.hvect_relax
+    use_anderson = params.use_anderson
 
     Hvect = if !isnothing(y_init)
         copy(y_init)
@@ -287,6 +287,15 @@ function run_counterfactual_4sector(base::BaseState4, params::ModelParams;
         push!(ws.outer_mean_static_iterations, mean(static_iterations[t_rng]))
         push!(ws.outer_max_static_iterations, maximum(static_iterations[t_rng]))
         push!(ws.outer_max_static_residual, maximum(static_residuals[t_rng]))
+        if params.record_trace
+            _write_outer_trace(
+                trace_path,
+                ws.outer_ymax,
+                ws.outer_mean_static_iterations,
+                ws.outer_max_static_iterations,
+                ws.outer_max_static_residual,
+            )
+        end
 
         if Ymax <= params.tol_dynamic
             converged = true
@@ -302,15 +311,14 @@ function run_counterfactual_4sector(base::BaseState4, params::ModelParams;
 
     actual_iters = converged ? iter : min(iter - 1, params.max_iter_dynamic)
 
-    if !isnothing(trace_path) && params.record_trace
-        trace_df = DataFrame(
-            outer_iter = collect(1:length(ws.outer_ymax)),
-            Ymax = ws.outer_ymax,
-            mean_static_iterations = ws.outer_mean_static_iterations,
-            max_static_iterations = ws.outer_max_static_iterations,
-            max_static_residual = ws.outer_max_static_residual,
+    if params.record_trace
+        _write_outer_trace(
+            trace_path,
+            ws.outer_ymax,
+            ws.outer_mean_static_iterations,
+            ws.outer_max_static_iterations,
+            ws.outer_max_static_residual,
         )
-        CSV.write(trace_path, trace_df)
     end
 
     CounterfactualPath4(

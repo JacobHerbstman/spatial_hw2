@@ -41,6 +41,11 @@ threads_dynamic = _env_bool("THREADS_DYNAMIC", false)
 threads_static = _env_bool("THREADS_STATIC", false)
 config_tag = get(ENV, "CONFIG_TAG", "default")
 record_trace = _env_bool("RECORD_TRACE", true)
+warm_start_static = strip(lowercase(get(ENV, "WARM_START_STATIC", "")))
+warm_start_static = isempty(warm_start_static) ? nothing : (warm_start_static in ("1", "true", "yes"))
+use_anderson = strip(lowercase(get(ENV, "USE_ANDERSON", "")))
+use_anderson = isempty(use_anderson) ? nothing : (use_anderson in ("1", "true", "yes"))
+hvect_relax = parse(Float64, get(ENV, "HVECT_RELAX", "0.5"))
 
 report = DataFrame()
 parity_time = DataFrame()
@@ -62,6 +67,9 @@ validate_stats = @timed begin
         threads_dynamic = threads_dynamic,
         threads_static = threads_static,
         profile = profile,
+        warm_start_static = warm_start_static,
+        use_anderson = use_anderson,
+        hvect_relax = hvect_relax,
         record_trace = record_trace,
     )
     rerun_trace_path = "../output/outer_trace_4sector_validate_rerun.csv"

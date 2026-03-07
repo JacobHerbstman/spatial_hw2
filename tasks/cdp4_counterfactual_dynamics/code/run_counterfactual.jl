@@ -89,6 +89,8 @@ threads_dynamic = _env_bool("THREADS_DYNAMIC", false)
 threads_static = _env_bool("THREADS_STATIC", false)
 profile = _env_profile()
 warm_start_static = _env_optional_bool("WARM_START_STATIC")
+use_anderson = _env_optional_bool("USE_ANDERSON")
+hvect_relax = parse(Float64, get(ENV, "HVECT_RELAX", "0.5"))
 record_trace = _env_bool("RECORD_TRACE", true)
 config_tag = get(ENV, "CONFIG_TAG", "default")
 shock_name = get(ENV, "SHOCK_NAME", get(ENV, "SHOCK_INPUT_MODE", "identity"))
@@ -106,6 +108,8 @@ params = default_model_params(
     threads_static = threads_static,
     profile = profile,
     warm_start_static = warm_start_static,
+    use_anderson = use_anderson,
+    hvect_relax = hvect_relax,
     record_trace = record_trace,
 )
 

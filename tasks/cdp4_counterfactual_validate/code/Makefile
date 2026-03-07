@@ -2,7 +2,7 @@ SHELL := bash
 include ../../shell_functions.make
 PYTHON ?= $(shell for p in /Users/jacobherbstman/miniconda3/bin/python3 python3 /Library/Frameworks/Python.framework/Versions/3.13/bin/python3; do if [ -x "$$p" ] && "$$p" -c "import pandas,matplotlib" >/dev/null 2>&1; then echo "$$p"; exit 0; fi; done; echo python3)
 
-.PHONY: all smoke identity_reference identity_fast toy_reference toy_fast generic_validate report report_smoke report_identity_fast report_identity_reference report_toy_fast report_toy_reference impact_report_toy_smoke_fast impact_report_toy_reference impact_report_generic state_maps state_maps_toy_reference state_maps_toy_fast state_maps_toy_smoke_fast prepare_inputs
+.PHONY: all smoke identity_reference identity_fast toy_reference toy_fast generic_validate report report_smoke report_identity_fast report_identity_reference report_toy_fast report_toy_reference impact_report_toy_smoke_fast impact_report_toy_reference impact_report_generic impact_report_focus state_maps state_maps_toy_reference state_maps_toy_fast state_maps_toy_smoke_fast prepare_inputs
 
 all: identity_fast
 
@@ -64,6 +64,15 @@ impact_report_generic:
 	@source ../../shell_functions.sh; PROFILE_TAG=$${PROFILE_TAG:-$${PROFILE:-fast}} SHOCK_NAME=$${SHOCK_NAME:-generic} IDENTITY_OUTPUT_FILE=$${IDENTITY_OUTPUT_FILE} SHOCK_OUTPUT_FILE=$${SHOCK_OUTPUT_FILE} OUTPUT_DIR=$${OUTPUT_DIR:-../output} Julia_pc_and_local --project=../../_lib/cdp_julia extract_broad_shock_impacts.jl
 	@mkdir -p ../temp/mpl
 	@MPLCONFIGDIR=../temp/mpl $(PYTHON) make_broad_shock_report.py --profile $${PROFILE_TAG:-$${PROFILE:-fast}} --shock $${SHOCK_NAME:-generic} --input-dir $${OUTPUT_DIR:-../output} --output-dir $${OUTPUT_DIR:-../output}
+
+impact_report_focus:
+	@test -n "$${IDENTITY_OUTPUT_FILE:-}" || (echo "IDENTITY_OUTPUT_FILE is required for impact_report_focus" >&2; exit 1)
+	@test -n "$${SHOCK_OUTPUT_FILE:-}" || (echo "SHOCK_OUTPUT_FILE is required for impact_report_focus" >&2; exit 1)
+	@if [ "$${SHOCK_INPUT_MODE:-csv}" = "csv" ] && [ -z "$${LAMBDA_CSV:-}" ]; then echo "LAMBDA_CSV is required when SHOCK_INPUT_MODE=csv" >&2; exit 1; fi
+	@if [ "$${SHOCK_INPUT_MODE:-csv}" = "mat" ] && [ -z "$${SHOCK_MAT:-}" ]; then echo "SHOCK_MAT is required when SHOCK_INPUT_MODE=mat" >&2; exit 1; fi
+	@source ../../shell_functions.sh; PROFILE_TAG=$${PROFILE_TAG:-$${PROFILE:-fast}} SHOCK_NAME=$${SHOCK_NAME:-generic} SHOCK_INPUT_MODE=$${SHOCK_INPUT_MODE:-csv} LAMBDA_CSV=$${LAMBDA_CSV:-} KAPPA_CSV=$${KAPPA_CSV:-} SHOCK_MAT=$${SHOCK_MAT:-} IDENTITY_OUTPUT_FILE=$${IDENTITY_OUTPUT_FILE} SHOCK_OUTPUT_FILE=$${SHOCK_OUTPUT_FILE} BASE_STATE_MAT=$${BASE_STATE_MAT:-../input/Base_year_four_sectors.mat} OUTPUT_DIR=$${OUTPUT_DIR:-../output} SHOCK_SECTOR=$${SHOCK_SECTOR:-4} SHOCK_REGION=$${SHOCK_REGION:-32} MAX_ITER_STATIC=$${MAX_ITER_STATIC:-2000} Julia_pc_and_local --project=../../_lib/cdp_julia extract_key_economic_series.jl
+	@mkdir -p ../temp/mpl
+	@MPLCONFIGDIR=../temp/mpl $(PYTHON) make_key_econ_report.py --profile $${PROFILE_TAG:-$${PROFILE:-fast}} --shock $${SHOCK_NAME:-generic} --input-dir $${OUTPUT_DIR:-../output} --output-dir $${OUTPUT_DIR:-../output}
 
 state_maps:
 	@source ../../shell_functions.sh; PROFILE_TAG=$${PROFILE_TAG:-$${PROFILE:-fast}} SHOCK_NAME=$${SHOCK_NAME:-toy} IDENTITY_OUTPUT_FILE=$${IDENTITY_OUTPUT_FILE:-../input/counterfactual_4sector_path_$${PROFILE_TAG:-$${PROFILE:-fast}}_identity.jld2} SHOCK_OUTPUT_FILE=$${SHOCK_OUTPUT_FILE:-../input/counterfactual_4sector_path_$${PROFILE_TAG:-$${PROFILE:-fast}}_$${SHOCK_NAME:-toy}.jld2} OUTPUT_DIR=$${OUTPUT_DIR:-../output} Julia_pc_and_local --project=../../_lib/cdp_julia extract_state_maps_data.jl

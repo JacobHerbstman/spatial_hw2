@@ -24,6 +24,8 @@ Base.@kwdef struct ModelParams
     threads_static::Bool = false
     profile::Symbol = :fast
     warm_start_static::Bool = true
+    use_anderson::Bool = false
+    hvect_relax::Float64 = 0.5
     record_trace::Bool = false
 end
 
@@ -397,9 +399,12 @@ function default_model_params(base::BaseState4; tol_static::Float64 = 1e-7,
                               threads_static::Bool = false,
                               profile::Symbol = :fast,
                               warm_start_static::Union{Nothing, Bool} = nothing,
+                              use_anderson::Union{Nothing, Bool} = nothing,
+                              hvect_relax::Float64 = 0.5,
                               record_trace::Bool = false)
     profile_checked = _check_profile(profile)
     warm_start = isnothing(warm_start_static) ? (profile_checked == :fast) : warm_start_static
+    anderson = isnothing(use_anderson) ? false : use_anderson
     ModelParams(
         beta = 0.99,
         nu = 5.3436,
@@ -413,6 +418,8 @@ function default_model_params(base::BaseState4; tol_static::Float64 = 1e-7,
         threads_static = threads_static,
         profile = profile_checked,
         warm_start_static = warm_start,
+        use_anderson = anderson,
+        hvect_relax = hvect_relax,
         record_trace = record_trace,
     )
 end
