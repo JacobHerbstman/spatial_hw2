@@ -91,6 +91,16 @@ def write_tex_table(df: pd.DataFrame, out_path: Path, caption: str, label: str) 
     out_path.write_text(wrapper)
 
 
+def maybe_set_log_scale(ax, *series: pd.Series) -> None:
+    positive = False
+    for series_item in series:
+        if pd.Series(series_item).gt(0).any():
+            positive = True
+            break
+    if positive:
+        ax.set_yscale("log")
+
+
 def make_plots_and_tables(profile: str, shock: str, dynamics_dir: Path, validate_dir: Path, out_dir: Path) -> None:
     shock_slug = slug(shock)
 
@@ -124,7 +134,7 @@ def make_plots_and_tables(profile: str, shock: str, dynamics_dir: Path, validate
 
     axs[1, 0].plot(parity["t"], parity["max_abs_error_t"], linewidth=1.5, label="Max Abs Error")
     axs[1, 0].plot(parity["t"], parity["mean_abs_error_t"], linewidth=1.5, label="Mean Abs Error")
-    axs[1, 0].set_yscale("log")
+    maybe_set_log_scale(axs[1, 0], parity["max_abs_error_t"], parity["mean_abs_error_t"])
     axs[1, 0].set_title("Parity Errors Over Time")
     axs[1, 0].set_xlabel("t")
     axs[1, 0].set_ylabel("Absolute Error (log scale)")
@@ -160,7 +170,7 @@ def make_plots_and_tables(profile: str, shock: str, dynamics_dir: Path, validate
     fig3, ax3 = plt.subplots(figsize=(7, 4.5))
     ax3.plot(parity["t"], parity["max_abs_error_t"], linewidth=1.8, label="Max Abs Error")
     ax3.plot(parity["t"], parity["mean_abs_error_t"], linewidth=1.8, label="Mean Abs Error")
-    ax3.set_yscale("log")
+    maybe_set_log_scale(ax3, parity["max_abs_error_t"], parity["mean_abs_error_t"])
     ax3.set_title("Counterfactual Parity by Time")
     ax3.set_xlabel("t")
     ax3.set_ylabel("Absolute Error (log scale)")

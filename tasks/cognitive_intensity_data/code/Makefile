@@ -7,14 +7,14 @@ all: summary
 
 download: ../intermediate/download_provenance.json
 
-compute: ../output/cognitive_intensity_matrix.csv ../output/cognitive_intensity_wide.csv
+compute: ../output/cognitive_intensity_matrix.csv ../output/cognitive_intensity_wide.csv ../output/cognitive_intensity_metadata.json
 
 summary: ../output/cognitive_intensity_summary.pdf
 
 ../intermediate/download_provenance.json: 01_download_data.py | ../input ../intermediate ../output ../temp
 	$(PYTHON) 01_download_data.py
 
-../output/cognitive_intensity_matrix.csv ../output/cognitive_intensity_wide.csv: 02_compute_intensity.py ../intermediate/download_provenance.json
+../output/cognitive_intensity_matrix.csv ../output/cognitive_intensity_wide.csv ../output/cognitive_intensity_metadata.json: 02_compute_intensity.py ../intermediate/download_provenance.json
 	$(PYTHON) 02_compute_intensity.py
 
 ../output/cognitive_intensity_summary.pdf: 03_summary_stats.py ../output/cognitive_intensity_matrix.csv ../intermediate/national_sector_cognitive.csv
@@ -25,4 +25,4 @@ summary: ../output/cognitive_intensity_summary.pdf
 
 clean:
 	rm -f ../intermediate/*.json ../intermediate/*.csv
-	rm -f ../output/*.csv ../output/*.pdf ../output/*.txt
+	rm -f ../output/*.csv ../output/*.pdf ../output/*.txt ../output/*.json

@@ -5,6 +5,7 @@ import json
 import re
 import sys
 import zipfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -15,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 INPUT_DIR = ROOT / "input"
 INTERMEDIATE_DIR = ROOT / "intermediate"
 OUTPUT_DIR = ROOT / "output"
+METADATA_PATH = OUTPUT_DIR / "cognitive_intensity_metadata.json"
 
 ONET_ACTIVITY_PATH = INPUT_DIR / "Work Activities.txt"
 ONET_OCC_PATH = INPUT_DIR / "Occupation Data.txt"
@@ -564,9 +566,62 @@ def load_qcew_state_industry() -> pd.DataFrame:
     return qcew
 
 
-def compute_state_sector_detailed(industry_df: pd.DataFrame) -> pd.DataFrame:
+def qcew_coverage_metadata(qcew: pd.DataFrame, available_codes: set[str]) -> dict:
+    qcew = qcew.copy()
+    sector_meta = qcew["naics_sig"].map(map_sector_from_naics)
+    qcew["sector_idx"] = sector_meta.map(lambda value: value[0] if value else np.nan)
+    qcew["sector_name"] = sector_meta.map(lambda value: value[1] if value else None)
+    qcew["exact_match"] = qcew["naics_sig"].isin(available_codes)
+    qcew["matched_naics_sig"] = qcew["naics_sig"].map(lambda code: longest_available_prefix(code, available_codes))
+    qcew["prefix_match"] = qcew["matched_naics_sig"].notna()
+
+    def summarize(frame: pd.DataFrame) -> dict:
+        employment = float(frame["employment"].sum())
+        exact_emp = float(frame.loc[frame["exact_match"], "employment"].sum())
+        prefix_emp = float(frame.loc[frame["prefix_match"], "employment"].sum())
+        return {
+            "employment": employment,
+            "exact_match_employment": exact_emp,
+            "prefix_match_employment": prefix_emp,
+            "exact_match_share": float(exact_emp / employment) if employment > 0 else float("nan"),
+            "prefix_match_share": float(prefix_emp / employment) if employment > 0 else float("nan"),
+        }
+
+    cdp_mask = qcew["sector_idx"].notna()
+    by_sector: list[dict] = []
+    for sector_idx, meta in CDP_SECTOR_MAP.items():
+        sector_frame = qcew[qcew["sector_idx"] == sector_idx]
+        summary = summarize(sector_frame)
+        by_sector.append(
+            {
+                "sector_idx": sector_idx,
+                "sector_name": meta["name"],
+                **summary,
+            }
+        )
+
+    return {
+        "overall_all_industries": summarize(qcew),
+        "overall_cdp_sectors": summarize(qcew[cdp_mask]),
+        "by_sector": by_sector,
+    }
+
+
+def compute_state_sector_detailed(industry_df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
     qcew = load_qcew_state_industry()
     available_codes = set(industry_df["naics_sig"].astype(str))
+    coverage = qcew_coverage_metadata(qcew, available_codes)
+    overall = coverage["overall_all_industries"]
+    overall_cdp = coverage["overall_cdp_sectors"]
+    log(
+        "QCEW to national-industry employment match share "
+        f"(all industries, exact/prefix): {overall['exact_match_share']:.4f} / {overall['prefix_match_share']:.4f}"
+    )
+    log(
+        "QCEW to national-industry employment match share "
+        f"(CDP sectors, exact/prefix): {overall_cdp['exact_match_share']:.4f} / {overall_cdp['prefix_match_share']:.4f}"
+    )
+
     qcew["matched_naics_sig"] = qcew["naics_sig"].astype(str).map(lambda code: longest_available_prefix(code, available_codes))
     merged = qcew.merge(
         industry_df[["naics_sig", "sector_idx", "sector_name", "cognitive_intensity_raw"]].rename(
@@ -575,10 +630,7 @@ def compute_state_sector_detailed(industry_df: pd.DataFrame) -> pd.DataFrame:
         on="matched_naics_sig",
         how="left",
     )
-    total_emp = qcew["employment"].sum()
-    matched_emp = merged.loc[merged["cognitive_intensity_raw"].notna(), "employment"].sum()
-    match_share = float(matched_emp / total_emp) if total_emp > 0 else float("nan")
-    log(f"QCEW to national-industry employment match share: {match_share:.4f}")
+    match_share = overall["prefix_match_share"]
     if not np.isfinite(match_share) or match_share < 0.40:
         raise RuntimeError(f"QCEW merge match share {match_share:.4f} is too low for the detailed state path.")
     if match_share < 0.75:
@@ -608,7 +660,10 @@ def compute_state_sector_detailed(industry_df: pd.DataFrame) -> pd.DataFrame:
     detailed = pd.DataFrame(rows).sort_values(["state_idx", "sector_idx"]).reset_index(drop=True)
     detailed.to_csv(INTERMEDIATE_DIR / "state_sector_cognitive_detailed.csv", index=False)
     log(f"Wrote detailed state-sector intensities to {INTERMEDIATE_DIR / 'state_sector_cognitive_detailed.csv'}")
-    return detailed
+    return detailed, {
+        "state_path_mode": "detailed",
+        "qcew_coverage": coverage,
+    }
 
 
 def locate_state_oews_workbook() -> Path:
@@ -661,7 +716,7 @@ def compute_state_sector_fallback(
     occ_scores: pd.DataFrame,
     sector_df: pd.DataFrame,
     national_overall: float,
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, dict]:
     workbook_path = locate_state_oews_workbook()
     log(f"Using 2023 state OEWS fallback workbook {workbook_path}")
     raw = read_excel_table(workbook_path, STATE_OEWS_COLUMN_ALIASES)
@@ -711,10 +766,39 @@ def compute_state_sector_fallback(
     fallback = pd.DataFrame(rows).sort_values(["state_idx", "sector_idx"]).reset_index(drop=True)
     fallback.to_csv(INTERMEDIATE_DIR / "state_sector_cognitive_fallback.csv", index=False)
     log(f"Wrote fallback state-sector intensities to {INTERMEDIATE_DIR / 'state_sector_cognitive_fallback.csv'}")
-    return fallback
+    return fallback, {
+        "state_path_mode": "fallback",
+        "qcew_coverage": None,
+    }
 
 
-def finalize_outputs(raw_state_sector: pd.DataFrame) -> None:
+def build_output_metadata(final_df: pd.DataFrame, provenance: list[dict], state_path_details: dict) -> dict:
+    source_files = {
+        row.get("dataset"): Path(row["local_path"]).name
+        for row in provenance
+        if row.get("dataset") and row.get("dataset") != "summary" and row.get("local_path")
+    }
+    metadata = {
+        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "source_files": source_files,
+        "download_provenance": provenance,
+        "state_path_mode": state_path_details.get("state_path_mode"),
+        "qcew_coverage": state_path_details.get("qcew_coverage"),
+        "detailed_path_error": state_path_details.get("detailed_path_error"),
+        "matrix_summary": {
+            "row_count": int(len(final_df)),
+            "state_count": int(final_df["state_idx"].nunique()),
+            "sector_count": int(final_df["sector_idx"].nunique()),
+            "cognitive_intensity_min": float(final_df["cognitive_intensity"].min()),
+            "cognitive_intensity_max": float(final_df["cognitive_intensity"].max()),
+            "cognitive_intensity_raw_min": float(final_df["cognitive_intensity_raw"].min()),
+            "cognitive_intensity_raw_max": float(final_df["cognitive_intensity_raw"].max()),
+        },
+    }
+    return metadata
+
+
+def finalize_outputs(raw_state_sector: pd.DataFrame, provenance: list[dict], state_path_details: dict) -> None:
     final_df = raw_state_sector.copy().sort_values(["state_idx", "sector_idx"]).reset_index(drop=True)
     if len(final_df) != 200:
         raise RuntimeError(f"Expected 200 state-sector rows, found {len(final_df)}")
@@ -734,7 +818,10 @@ def finalize_outputs(raw_state_sector: pd.DataFrame) -> None:
         .sort_values("state_idx")
     )
     wide.to_csv(OUTPUT_DIR / "cognitive_intensity_wide.csv", index=False)
+    metadata = build_output_metadata(final_df, provenance, state_path_details)
+    METADATA_PATH.write_text(json.dumps(metadata, indent=2))
     log(f"Wrote final outputs to {OUTPUT_DIR / 'cognitive_intensity_matrix.csv'} and {OUTPUT_DIR / 'cognitive_intensity_wide.csv'}")
+    log(f"Wrote metadata to {METADATA_PATH}")
 
 
 def main() -> None:
@@ -753,12 +840,13 @@ def main() -> None:
     industry_df, sector_df, national_overall = compute_national_outputs(merged)
 
     try:
-        raw_state_sector = compute_state_sector_detailed(industry_df)
+        raw_state_sector, state_path_details = compute_state_sector_detailed(industry_df)
     except Exception as exc:
         log(f"Detailed state path failed: {exc}")
-        raw_state_sector = compute_state_sector_fallback(occ_scores, sector_df, national_overall)
+        raw_state_sector, state_path_details = compute_state_sector_fallback(occ_scores, sector_df, national_overall)
+        state_path_details["detailed_path_error"] = str(exc)
 
-    finalize_outputs(raw_state_sector)
+    finalize_outputs(raw_state_sector, provenance, state_path_details)
 
 
 if __name__ == "__main__":

@@ -101,8 +101,15 @@ profile = _env_profile()
 time_horizon = parse(Int, get(ENV, "TIME_HORIZON", "200"))
 validation_kind = lowercase(get(ENV, "VALIDATION_KIND", "identity"))
 shock_name = get(ENV, "SHOCK_NAME", get(ENV, "SHOCK_INPUT_MODE", "identity"))
-mode_label_default = validation_kind == "identity" ? (profile == :reference ? "identity_reference" : "identity_fast") :
-    (profile == :reference ? "toy_reference" : "toy_fast")
+mode_label_default = if validation_kind == "identity"
+    profile == :reference ? "identity_reference" : "identity_fast"
+elseif validation_kind == "toy"
+    profile == :reference ? "toy_reference" : "toy_fast"
+elseif validation_kind == "generic"
+    profile == :reference ? "generic_reference" : "generic_fast"
+else
+    profile == :reference ? "counterfactual_reference" : "counterfactual_fast"
+end
 mode_label = get(ENV, "VALIDATION_MODE", mode_label_default)
 rel_tol_default = validation_kind == "identity" ? "1e-4" : "1e-3"
 rel_tol = parse(Float64, get(ENV, "REL_TOL", rel_tol_default))
@@ -162,8 +169,10 @@ validate_stats = @timed begin
         else
             parity_time = parity_by_time_counterfactual(path, baseline_anchor_y; mode_label = mode_label)
         end
+    elseif validation_kind == "generic"
+        report = validate_counterfactual_core_4sector(path; dyn_tol = tol_dynamic, mode_label = mode_label)
     else
-        error("Unsupported VALIDATION_KIND=$(validation_kind). Use identity or toy.")
+        error("Unsupported VALIDATION_KIND=$(validation_kind). Use identity, toy, or generic.")
     end
 
     base = load_base_state_4sector("../input/Base_year_four_sectors.mat")
@@ -207,6 +216,8 @@ validate_stats = @timed begin
         report = vcat(report, _status_row(mode_label, "identity_roundtrip_ynew_max_abs_error", rt_abs, roundtrip_tol, rt_abs <= roundtrip_tol))
         report = vcat(report, _status_row(mode_label, "identity_roundtrip_ynew_max_rel_error", rt_rel, roundtrip_tol, rt_rel <= roundtrip_tol))
         report = vcat(report, _status_row(mode_label, "identity_roundtrip_iterations", rt_iter, Float64(roundtrip_max_iters), rt_iter <= roundtrip_max_iters))
+    elseif validation_kind == "generic"
+        parity_time = parity_by_time_counterfactual(path, path_rerun.Ynew; mode_label = mode_label)
     end
 
     if !isempty(reference_output_file) && isfile(reference_output_file)
