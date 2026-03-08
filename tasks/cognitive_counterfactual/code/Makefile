@@ -7,6 +7,7 @@ DELTA_CANDIDATES ?= 0.01,0.005,0.0025,0.001,0.0005,0.00025
 TIME_HORIZON ?= 200
 FOCUS_SECTOR ?= 4
 FOCUS_REGION ?= 32
+REFERENCE_TOL_DYNAMIC ?= 1e-4
 
 IMMEDIATE_SHOCK_NAME := cognitive_immediate
 ANTICIPATED_SHOCK_NAME := cognitive_anticipated
@@ -21,11 +22,12 @@ DELTA_SELECTION_FILE := $(abspath ../output/selected_reference_delta.json)
 SOLVER_SETTINGS_FILE := $(abspath ../output/reference_solver_settings.json)
 BASELINE_VALIDATION_SOURCE := $(abspath ../../cdp4_baseline_validate/output/validation_report_4sector_reference.csv)
 BASELINE_VALIDATION_LINK := ../output/baseline_validation_reference.csv
+REFERENCE_BRIEF_FILE := $(abspath ../output/reference_figure_brief.md)
 
 REFERENCE_ENV := WARM_START_STATIC=0 USE_ANDERSON=0 HVECT_RELAX=0.5 USE_THREADS=0 THREADS_DYNAMIC=0 THREADS_STATIC=0
 FAST_ENV := WARM_START_STATIC=1 USE_ANDERSON=0 HVECT_RELAX=0.05 USE_THREADS=1 THREADS_DYNAMIC=1 THREADS_STATIC=1
 
-.PHONY: all generate_shocks select_reference_delta prepare_reference_inputs prepare_fast_inputs reference fast submission_reference submission_fast run_reference run_fast validate_reference validate_fast report_reference report_fast immediate_reference anticipated_reference immediate_fast anticipated_fast validate_immediate_reference validate_anticipated_reference validate_immediate_fast validate_anticipated_fast report_immediate_reference report_anticipated_reference report_immediate_fast report_anticipated_fast collect_baseline_reference clean_submission_outputs all_reference all_fast clean
+.PHONY: all generate_shocks select_reference_delta prepare_reference_inputs prepare_fast_inputs reference fast submission_reference submission_fast run_reference run_fast validate_reference validate_fast report_reference report_fast immediate_reference anticipated_reference immediate_fast anticipated_fast validate_immediate_reference validate_anticipated_reference validate_immediate_fast validate_anticipated_fast report_immediate_reference report_anticipated_reference report_immediate_fast report_anticipated_fast reference_figure_brief collect_baseline_reference clean_submission_outputs all_reference all_fast clean
 
 all: submission_reference
 
@@ -45,6 +47,7 @@ submission_reference:
 	$(MAKE) clean_submission_outputs
 	$(MAKE) collect_baseline_reference
 	$(MAKE) report_reference
+	$(MAKE) reference_figure_brief
 
 submission_fast:
 	$(MAKE) clean_submission_outputs
@@ -63,6 +66,9 @@ report_reference: report_immediate_reference report_anticipated_reference
 
 report_fast: report_immediate_fast report_anticipated_fast
 
+reference_figure_brief: report_reference
+	$(PYTHON) write_reference_figure_brief.py --output-dir "$(TASK_OUTPUT_DIR)" --dynamics-output-dir "$(DYNAMICS_OUTPUT_DIR)" --validate-output-dir "$(VALIDATE_OUTPUT_DIR)" --profile reference --immediate-shock "$(IMMEDIATE_SHOCK_NAME)" --anticipated-shock "$(ANTICIPATED_SHOCK_NAME)"
+
 all_reference: submission_reference
 
 all_fast: submission_fast
@@ -80,16 +86,16 @@ anticipated_fast: $(DELTA_SELECTION_FILE) prepare_fast_inputs
 	$(FAST_ENV) $(MAKE) -C $(DYNAMICS_DIR) csv_fast LAMBDA_CSV="$(abspath ../output/lambda_anticipated.csv)" SHOCK_NAME="$(ANTICIPATED_SHOCK_NAME)" TIME_HORIZON="$(TIME_HORIZON)" BASELINE_ANCHOR_FILE="$(abspath ../input/baseline_4sector_path_reference.jld2)" CONFIG_TAG="$(ANTICIPATED_SHOCK_NAME)_fast_debug"
 
 validate_immediate_reference: immediate_reference
-	$(REFERENCE_ENV) $(MAKE) -C $(VALIDATE_DIR) generic_validate PROFILE=reference SHOCK_INPUT_MODE=csv SHOCK_NAME="$(IMMEDIATE_SHOCK_NAME)" LAMBDA_CSV="$(abspath ../output/lambda_immediate.csv)" TIME_HORIZON="$(TIME_HORIZON)" COUNTERFACTUAL_OUTPUT_FILE="$(abspath ../../cdp4_counterfactual_dynamics/output/counterfactual_4sector_path_reference_$(IMMEDIATE_SHOCK_NAME).jld2)" IDENTITY_OUTPUT_FILE="$(abspath ../input/counterfactual_4sector_path_reference_identity.jld2)" BASELINE_ANCHOR_FILE="$(abspath ../input/baseline_4sector_path_reference.jld2)" TOL_DYNAMIC=1e-3 FAIL_ON_CHECKS=1 CONFIG_TAG="$(IMMEDIATE_SHOCK_NAME)_reference_validate_submission"
+	$(REFERENCE_ENV) $(MAKE) -C $(VALIDATE_DIR) generic_validate PROFILE=reference SHOCK_INPUT_MODE=csv SHOCK_NAME="$(IMMEDIATE_SHOCK_NAME)" LAMBDA_CSV="$(abspath ../output/lambda_immediate.csv)" TIME_HORIZON="$(TIME_HORIZON)" COUNTERFACTUAL_OUTPUT_FILE="$(abspath ../../cdp4_counterfactual_dynamics/output/counterfactual_4sector_path_reference_$(IMMEDIATE_SHOCK_NAME).jld2)" IDENTITY_OUTPUT_FILE="$(abspath ../input/counterfactual_4sector_path_reference_identity.jld2)" BASELINE_ANCHOR_FILE="$(abspath ../input/baseline_4sector_path_reference.jld2)" TOL_DYNAMIC=$(REFERENCE_TOL_DYNAMIC) FAIL_ON_CHECKS=1 REQUIRE_T1_RESPONSE=1 CONFIG_TAG="$(IMMEDIATE_SHOCK_NAME)_reference_validate_submission"
 
 validate_anticipated_reference: anticipated_reference
-	$(REFERENCE_ENV) $(MAKE) -C $(VALIDATE_DIR) generic_validate PROFILE=reference SHOCK_INPUT_MODE=csv SHOCK_NAME="$(ANTICIPATED_SHOCK_NAME)" LAMBDA_CSV="$(abspath ../output/lambda_anticipated.csv)" TIME_HORIZON="$(TIME_HORIZON)" COUNTERFACTUAL_OUTPUT_FILE="$(abspath ../../cdp4_counterfactual_dynamics/output/counterfactual_4sector_path_reference_$(ANTICIPATED_SHOCK_NAME).jld2)" IDENTITY_OUTPUT_FILE="$(abspath ../input/counterfactual_4sector_path_reference_identity.jld2)" BASELINE_ANCHOR_FILE="$(abspath ../input/baseline_4sector_path_reference.jld2)" TOL_DYNAMIC=1e-3 FAIL_ON_CHECKS=1 CONFIG_TAG="$(ANTICIPATED_SHOCK_NAME)_reference_validate_submission"
+	$(REFERENCE_ENV) $(MAKE) -C $(VALIDATE_DIR) generic_validate PROFILE=reference SHOCK_INPUT_MODE=csv SHOCK_NAME="$(ANTICIPATED_SHOCK_NAME)" LAMBDA_CSV="$(abspath ../output/lambda_anticipated.csv)" TIME_HORIZON="$(TIME_HORIZON)" COUNTERFACTUAL_OUTPUT_FILE="$(abspath ../../cdp4_counterfactual_dynamics/output/counterfactual_4sector_path_reference_$(ANTICIPATED_SHOCK_NAME).jld2)" IDENTITY_OUTPUT_FILE="$(abspath ../input/counterfactual_4sector_path_reference_identity.jld2)" BASELINE_ANCHOR_FILE="$(abspath ../input/baseline_4sector_path_reference.jld2)" TOL_DYNAMIC=$(REFERENCE_TOL_DYNAMIC) FAIL_ON_CHECKS=1 REQUIRE_T1_RESPONSE=1 CONFIG_TAG="$(ANTICIPATED_SHOCK_NAME)_reference_validate_submission"
 
 validate_immediate_fast: immediate_fast
-	$(FAST_ENV) $(MAKE) -C $(VALIDATE_DIR) generic_validate PROFILE=fast SHOCK_INPUT_MODE=csv SHOCK_NAME="$(IMMEDIATE_SHOCK_NAME)" LAMBDA_CSV="$(abspath ../output/lambda_immediate.csv)" TIME_HORIZON="$(TIME_HORIZON)" COUNTERFACTUAL_OUTPUT_FILE="$(abspath ../../cdp4_counterfactual_dynamics/output/counterfactual_4sector_path_fast_$(IMMEDIATE_SHOCK_NAME).jld2)" IDENTITY_OUTPUT_FILE="$(abspath ../input/counterfactual_4sector_path_fast_identity.jld2)" BASELINE_ANCHOR_FILE="$(abspath ../input/baseline_4sector_path_reference.jld2)" TOL_DYNAMIC=1e-3 FAIL_ON_CHECKS=1 CONFIG_TAG="$(IMMEDIATE_SHOCK_NAME)_fast_validate_debug"
+	$(FAST_ENV) $(MAKE) -C $(VALIDATE_DIR) generic_validate PROFILE=fast SHOCK_INPUT_MODE=csv SHOCK_NAME="$(IMMEDIATE_SHOCK_NAME)" LAMBDA_CSV="$(abspath ../output/lambda_immediate.csv)" TIME_HORIZON="$(TIME_HORIZON)" COUNTERFACTUAL_OUTPUT_FILE="$(abspath ../../cdp4_counterfactual_dynamics/output/counterfactual_4sector_path_fast_$(IMMEDIATE_SHOCK_NAME).jld2)" IDENTITY_OUTPUT_FILE="$(abspath ../input/counterfactual_4sector_path_fast_identity.jld2)" BASELINE_ANCHOR_FILE="$(abspath ../input/baseline_4sector_path_reference.jld2)" TOL_DYNAMIC=1e-3 FAIL_ON_CHECKS=1 REQUIRE_T1_RESPONSE=1 CONFIG_TAG="$(IMMEDIATE_SHOCK_NAME)_fast_validate_debug"
 
 validate_anticipated_fast: anticipated_fast
-	$(FAST_ENV) $(MAKE) -C $(VALIDATE_DIR) generic_validate PROFILE=fast SHOCK_INPUT_MODE=csv SHOCK_NAME="$(ANTICIPATED_SHOCK_NAME)" LAMBDA_CSV="$(abspath ../output/lambda_anticipated.csv)" TIME_HORIZON="$(TIME_HORIZON)" COUNTERFACTUAL_OUTPUT_FILE="$(abspath ../../cdp4_counterfactual_dynamics/output/counterfactual_4sector_path_fast_$(ANTICIPATED_SHOCK_NAME).jld2)" IDENTITY_OUTPUT_FILE="$(abspath ../input/counterfactual_4sector_path_fast_identity.jld2)" BASELINE_ANCHOR_FILE="$(abspath ../input/baseline_4sector_path_reference.jld2)" TOL_DYNAMIC=1e-3 FAIL_ON_CHECKS=1 CONFIG_TAG="$(ANTICIPATED_SHOCK_NAME)_fast_validate_debug"
+	$(FAST_ENV) $(MAKE) -C $(VALIDATE_DIR) generic_validate PROFILE=fast SHOCK_INPUT_MODE=csv SHOCK_NAME="$(ANTICIPATED_SHOCK_NAME)" LAMBDA_CSV="$(abspath ../output/lambda_anticipated.csv)" TIME_HORIZON="$(TIME_HORIZON)" COUNTERFACTUAL_OUTPUT_FILE="$(abspath ../../cdp4_counterfactual_dynamics/output/counterfactual_4sector_path_fast_$(ANTICIPATED_SHOCK_NAME).jld2)" IDENTITY_OUTPUT_FILE="$(abspath ../input/counterfactual_4sector_path_fast_identity.jld2)" BASELINE_ANCHOR_FILE="$(abspath ../input/baseline_4sector_path_reference.jld2)" TOL_DYNAMIC=1e-3 FAIL_ON_CHECKS=1 REQUIRE_T1_RESPONSE=1 CONFIG_TAG="$(ANTICIPATED_SHOCK_NAME)_fast_validate_debug"
 
 report_immediate_reference: validate_immediate_reference
 	$(MAKE) -C $(VALIDATE_DIR) report PROFILE=reference SHOCK_NAME="$(IMMEDIATE_SHOCK_NAME)"
@@ -116,7 +122,7 @@ report_anticipated_fast: validate_anticipated_fast
 	$(PYTHON) collect_outputs.py --scenario-name "$(ANTICIPATED_SHOCK_NAME)" --profile fast --dynamics-output-dir "$(DYNAMICS_OUTPUT_DIR)" --validate-output-dir "$(VALIDATE_OUTPUT_DIR)" --output-dir "$(TASK_OUTPUT_DIR)" --lambda-file "$(abspath ../output/lambda_anticipated.csv)" --delta-selection-file "$(DELTA_SELECTION_FILE)" --solver-settings-file "$(SOLVER_SETTINGS_FILE)" --baseline-validation-file "$(abspath $(BASELINE_VALIDATION_LINK))"
 
 clean_submission_outputs:
-	rm -f ../output/*$(IMMEDIATE_SHOCK_NAME)* ../output/*$(ANTICIPATED_SHOCK_NAME)* ../output/baseline_validation_reference.csv
+	rm -f ../output/*$(IMMEDIATE_SHOCK_NAME)* ../output/*$(ANTICIPATED_SHOCK_NAME)* ../output/baseline_validation_reference.csv "$(REFERENCE_BRIEF_FILE)"
 
 collect_baseline_reference: $(BASELINE_VALIDATION_LINK)
 

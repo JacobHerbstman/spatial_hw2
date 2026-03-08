@@ -1,6 +1,8 @@
 SHELL := bash
 include ../../shell_functions.make
 
+REFERENCE_TOL_DYNAMIC ?= 1e-4
+
 .PHONY: all smoke replication_reference replication_fast prepare_inputs
 
 all: replication_fast
@@ -11,7 +13,7 @@ smoke: prepare_inputs
 	@source ../../shell_functions.sh; PROFILE=fast RECORD_TRACE=1 TOL_DYNAMIC=1e-3 MAX_ITER_DYNAMIC=5 MAX_ITER_STATIC=2000 USE_THREADS=1 THREADS_DYNAMIC=1 THREADS_STATIC=1 CONFIG_TAG=smoke Julia_pc_and_local --project=../../_lib/cdp_julia run_baseline.jl
 
 replication_reference: prepare_inputs
-	@source ../../shell_functions.sh; PROFILE=reference RECORD_TRACE=1 TOL_DYNAMIC=1e-3 MAX_ITER_DYNAMIC=1000 MAX_ITER_STATIC=2000 USE_THREADS=0 THREADS_DYNAMIC=0 THREADS_STATIC=0 CONFIG_TAG=replication_reference Julia_pc_and_local --project=../../_lib/cdp_julia run_baseline.jl
+	@source ../../shell_functions.sh; PROFILE=reference RECORD_TRACE=1 TOL_DYNAMIC=$(REFERENCE_TOL_DYNAMIC) MAX_ITER_DYNAMIC=1000 MAX_ITER_STATIC=2000 USE_THREADS=0 THREADS_DYNAMIC=0 THREADS_STATIC=0 CONFIG_TAG=replication_reference Julia_pc_and_local --project=../../_lib/cdp_julia run_baseline.jl
 
 replication_fast: prepare_inputs
 	@source ../../shell_functions.sh; PROFILE=fast RECORD_TRACE=1 TOL_DYNAMIC=1e-3 MAX_ITER_DYNAMIC=1000 MAX_ITER_STATIC=2000 USE_THREADS=1 THREADS_DYNAMIC=1 THREADS_STATIC=1 CONFIG_TAG=replication_fast Julia_pc_and_local --project=../../_lib/cdp_julia run_baseline.jl

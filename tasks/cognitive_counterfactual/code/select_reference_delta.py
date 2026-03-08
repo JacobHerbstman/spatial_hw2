@@ -26,6 +26,8 @@ REFERENCE_SOLVER_SETTINGS = {
     "THREADS_DYNAMIC": "0",
     "THREADS_STATIC": "0",
 }
+REFERENCE_TOL_DYNAMIC = "1e-4"
+REFERENCE_TOL_DYNAMIC_FLOAT = float(REFERENCE_TOL_DYNAMIC)
 DEFAULT_FULL_MAX_ITER = 1000
 DEFAULT_SCREEN_MAX_ITER = 10
 DEFAULT_SCREEN_DIVERGENCE_RATIO = 3.0
@@ -187,6 +189,7 @@ def run_validation_for_scenario(
         "generic_validate",
         "PROFILE=reference",
         "FAIL_ON_CHECKS=1",
+        "REQUIRE_T1_RESPONSE=1",
         "SHOCK_INPUT_MODE=csv",
         f"SHOCK_NAME={scenario_name}",
         f"LAMBDA_CSV={lambda_path}",
@@ -194,7 +197,7 @@ def run_validation_for_scenario(
         f"COUNTERFACTUAL_OUTPUT_FILE={counterfactual_output_file}",
         f"IDENTITY_OUTPUT_FILE={identity_output_file}",
         f"BASELINE_ANCHOR_FILE={baseline_anchor_file}",
-        "TOL_DYNAMIC=1e-3",
+        f"TOL_DYNAMIC={REFERENCE_TOL_DYNAMIC}",
         f"CONFIG_TAG={scenario_name}_delta_validation",
     ]
     run_cmd(cmd, env=env)
@@ -282,7 +285,7 @@ def run_candidate(delta: float, script_dir: Path, matrix_path: Path, temp_dir: P
             candidate_result["failure_reason"] = "screen_rejected_divergence"
             return candidate_result, candidate_dir
 
-        if screen_result["converged"] and screen_result["final_ymax"] <= 1e-3:
+        if screen_result["converged"] and screen_result["final_ymax"] <= REFERENCE_TOL_DYNAMIC_FLOAT:
             scenario_result = screen_result
             scenario_result["trace_tail"] = screen_trace_tail
             scenario_result["screened_only"] = True
@@ -336,7 +339,7 @@ def run_candidate(delta: float, script_dir: Path, matrix_path: Path, temp_dir: P
 
     candidate_result["all_converged"] = all(
         scenario["converged"] and
-        scenario["final_ymax"] <= 1e-3 and
+        scenario["final_ymax"] <= REFERENCE_TOL_DYNAMIC_FLOAT and
         scenario.get("validation", {}).get("all_passed", False)
         for scenario in candidate_result["scenarios"].values()
     )

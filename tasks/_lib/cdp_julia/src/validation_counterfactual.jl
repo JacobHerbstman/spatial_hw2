@@ -54,7 +54,7 @@ function validate_counterfactual_core_4sector(path::CounterfactualPath4;
     push!(rows, (String(mode_label), "finite_Ldyn", finite_L ? 1.0 : 0.0, 1.0, _cf_bool_to_str(finite_L)))
     push!(rows, (String(mode_label), "finite_realwages", finite_rw ? 1.0 : 0.0, 1.0, _cf_bool_to_str(finite_rw)))
 
-    t_start = min(2, size(path.mu_path, 3))
+    t_start = min(1, size(path.mu_path, 3))
     t_last = max(t_start, size(path.mu_path, 3) - 1)
     mu_row_err = 0.0
     @inbounds for t in t_start:t_last
@@ -65,7 +65,7 @@ function validate_counterfactual_core_4sector(path::CounterfactualPath4;
             end
         end
     end
-    push!(rows, (String(mode_label), "mu_row_sum_max_abs_error_t_ge_2", mu_row_err, 1e-8, _cf_bool_to_str(mu_row_err <= 1e-8)))
+    push!(rows, (String(mode_label), "mu_row_sum_max_abs_error_t_lt_T", mu_row_err, 1e-8, _cf_bool_to_str(mu_row_err <= 1e-8)))
 
     nonneg_L = minimum(path.Ldyn)
     push!(rows, (String(mode_label), "ldyn_min", nonneg_L, -1e-10, _cf_bool_to_str(nonneg_L >= -1e-10)))
@@ -124,8 +124,7 @@ function validate_counterfactual_response_4sector(path::CounterfactualPath4,
                                                   identity_path::CounterfactualPath4;
                                                   shocks::Union{Nothing, CounterfactualShocks4} = nothing,
                                                   response_tol::Float64 = 1e-12,
-                                                  pre_activation_tol::Float64 = 1e-12,
-                                                  require_pre_activation_zero::Bool = false,
+                                                  require_t1_response::Bool = false,
                                                   mode_label::AbstractString = "counterfactual")
     if size(path.Ynew) != size(identity_path.Ynew) ||
        size(path.mu_path) != size(identity_path.mu_path) ||
@@ -140,11 +139,15 @@ function validate_counterfactual_response_4sector(path::CounterfactualPath4,
     max_abs_rw = _cf_max_abs_diff(path.realwages, identity_path.realwages)
     max_abs_L = _cf_max_abs_diff(path.Ldyn, identity_path.Ldyn)
     max_abs_mu = _cf_max_abs_diff(path.mu_path, identity_path.mu_path)
+    max_abs_mu_t1 = _cf_max_abs_diff_t(path.mu_path, identity_path.mu_path, 1:1)
+    max_abs_L_t2 = size(path.Ldyn, 3) < 2 ? 0.0 : _cf_max_abs_diff_t(path.Ldyn, identity_path.Ldyn, 2:2)
 
     push!(rows, (String(mode_label), "max_abs_Y_diff_vs_identity", max_abs_Y, response_tol, _cf_bool_to_str(max_abs_Y > response_tol)))
     push!(rows, (String(mode_label), "max_abs_realwage_diff_vs_identity", max_abs_rw, response_tol, _cf_bool_to_str(max_abs_rw > response_tol)))
     push!(rows, (String(mode_label), "max_abs_Ldyn_diff_vs_identity", max_abs_L, response_tol, _cf_bool_to_str(max_abs_L > response_tol)))
     push!(rows, (String(mode_label), "max_abs_mu_diff_vs_identity", max_abs_mu, response_tol, _cf_bool_to_str(max_abs_mu > response_tol)))
+    push!(rows, (String(mode_label), "max_abs_mu_t1_diff_vs_identity", max_abs_mu_t1, response_tol, _cf_bool_to_str(max_abs_mu_t1 > response_tol)))
+    push!(rows, (String(mode_label), "max_abs_L_t2_diff_vs_identity", max_abs_L_t2, response_tol, _cf_bool_to_str(max_abs_L_t2 > response_tol)))
 
     stale_path = (max_abs_Y > response_tol || max_abs_rw > response_tol) &&
                  max_abs_L <= response_tol &&
@@ -154,21 +157,19 @@ function validate_counterfactual_response_4sector(path::CounterfactualPath4,
     response_gate = max_abs_L > response_tol && max_abs_mu > response_tol
     push!(rows, (String(mode_label), "nonidentity_response_gate", response_gate ? 1.0 : 0.0, 1.0, _cf_bool_to_str(response_gate)))
 
+    t1_response_gate = !require_t1_response || (max_abs_mu_t1 > response_tol && max_abs_L_t2 > response_tol)
+    push!(rows, (String(mode_label), "t1_response_gate", t1_response_gate ? 1.0 : 0.0, 1.0, _cf_bool_to_str(t1_response_gate)))
+
     if !isnothing(shocks)
         active = _cf_active_shock_window(shocks; tol = response_tol)
         if !isnothing(active.first_t) && active.first_t > 1
             # Temporary-equilibrium shocks at period t affect path objects dated t+1.
             response_start_t = min(size(path.Ynew, 2), active.first_t + 1)
-            pre_rng = 1:(response_start_t - 1)
             post_rng = response_start_t:(size(path.Ynew, 2) - 1)
 
-            pre_L = _cf_max_abs_diff_t(path.Ldyn, identity_path.Ldyn, pre_rng)
-            pre_mu = _cf_max_abs_diff_t(path.mu_path, identity_path.mu_path, pre_rng)
             post_L = _cf_max_abs_diff_t(path.Ldyn, identity_path.Ldyn, post_rng)
             post_mu = _cf_max_abs_diff_t(path.mu_path, identity_path.mu_path, post_rng)
 
-            push!(rows, (String(mode_label), "pre_activation_max_abs_Ldyn_diff_vs_identity", pre_L, pre_activation_tol, _cf_bool_to_str(!require_pre_activation_zero || pre_L <= pre_activation_tol)))
-            push!(rows, (String(mode_label), "pre_activation_max_abs_mu_diff_vs_identity", pre_mu, pre_activation_tol, _cf_bool_to_str(!require_pre_activation_zero || pre_mu <= pre_activation_tol)))
             push!(rows, (String(mode_label), "post_activation_max_abs_Ldyn_diff_vs_identity", post_L, response_tol, _cf_bool_to_str(post_L > response_tol)))
             push!(rows, (String(mode_label), "post_activation_max_abs_mu_diff_vs_identity", post_mu, response_tol, _cf_bool_to_str(post_mu > response_tol)))
         end

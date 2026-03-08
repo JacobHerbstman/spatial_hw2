@@ -124,6 +124,38 @@ function _record_outer_stats!(outer_ymax::Vector{Float64},
     nothing
 end
 
+function _record_outer_iteration!(outer_ymax::Vector{Float64},
+                                  outer_mean_static_iterations::Vector{Float64},
+                                  outer_max_static_iterations::Vector{Int},
+                                  outer_max_static_residual::Vector{Float64},
+                                  Ymax::Float64,
+                                  static_iterations::Vector{Int},
+                                  static_residuals::Vector{Float64},
+                                  t_rng,
+                                  record_trace::Bool,
+                                  trace_path::Union{Nothing, AbstractString})
+    _record_outer_stats!(
+        outer_ymax,
+        outer_mean_static_iterations,
+        outer_max_static_iterations,
+        outer_max_static_residual,
+        Ymax,
+        static_iterations,
+        static_residuals,
+        t_rng,
+    )
+    if record_trace
+        _write_outer_trace(
+            trace_path,
+            outer_ymax,
+            outer_mean_static_iterations,
+            outer_max_static_iterations,
+            outer_max_static_residual,
+        )
+    end
+    nothing
+end
+
 function _anderson_update!(acc::AndersonAccelerator, x::Matrix{Float64}, g::Matrix{Float64})
     if length(x) != acc.n || length(g) != acc.n
         error("Anderson state size mismatch: expected n=$(acc.n), got $(length(x)) and $(length(g)).")
@@ -379,9 +411,9 @@ function run_baseline_4sector(base::BaseState4, params::ModelParams; time_horizo
     _anderson_reset!(acc)
 
     Ynew_last = copy(Hvect)
+    candidate_hvect = similar(Hvect)
     converged = false
     final_ymax = Inf
-    converged_streak = 0
 
     iter = 1
     while (iter <= params.max_iter_dynamic)
@@ -405,7 +437,7 @@ function run_baseline_4sector(base::BaseState4, params::ModelParams; time_horizo
         final_ymax = Ymax
 
         t_rng = 2:(time_horizon - 1)
-        _record_outer_stats!(
+        _record_outer_iteration!(
             ws.outer_ymax,
             ws.outer_mean_static_iterations,
             ws.outer_max_static_iterations,
@@ -414,26 +446,53 @@ function run_baseline_4sector(base::BaseState4, params::ModelParams; time_horizo
             static_iterations,
             static_residuals,
             t_rng,
+            params.record_trace,
+            trace_path,
         )
-        if params.record_trace
-            _write_outer_trace(
-                trace_path,
+
+        if Ymax <= params.tol_dynamic
+            candidate_hvect .= ws.ynew
+            confirm_ymax = _baseline_outer_sweep!(
+                base,
+                params,
+                candidate_hvect,
+                ws,
+                mu_path,
+                Ldyn,
+                realwages,
+                static_residuals,
+                static_iterations;
+                dynamic_threaded = dynamic_threaded,
+                warm_start_static = warm_start_static,
+                reset_price_guess = reset_price_guess,
+            )
+            Ynew_last .= ws.ynew
+            final_ymax = confirm_ymax
+            _record_outer_iteration!(
                 ws.outer_ymax,
                 ws.outer_mean_static_iterations,
                 ws.outer_max_static_iterations,
                 ws.outer_max_static_residual,
+                confirm_ymax,
+                static_iterations,
+                static_residuals,
+                t_rng,
+                params.record_trace,
+                trace_path,
             )
-        end
 
-        if Ymax <= params.tol_dynamic
-            converged_streak += 1
-        else
-            converged_streak = 0
-        end
+            if confirm_ymax <= params.tol_dynamic
+                converged = true
+                break
+            end
 
-        if Ymax <= params.tol_dynamic && converged_streak >= 2
-            converged = true
-            break
+            if iter == params.max_iter_dynamic
+                break
+            elseif use_anderson
+                _anderson_update!(acc, Hvect, candidate_hvect)
+            else
+                _relax_hvect!(Hvect, candidate_hvect, hvect_relax)
+            end
         elseif iter == params.max_iter_dynamic
             break
         elseif use_anderson
@@ -445,7 +504,7 @@ function run_baseline_4sector(base::BaseState4, params::ModelParams; time_horizo
         iter += 1
     end
 
-    actual_iters = min(length(ws.outer_ymax), params.max_iter_dynamic)
+    actual_iters = length(ws.outer_ymax)
 
     if params.record_trace
         _write_outer_trace(

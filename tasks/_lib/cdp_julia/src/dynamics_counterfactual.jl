@@ -14,23 +14,6 @@ function _check_counterfactual_shapes(base::BaseState4, baseline_anchor_y::Matri
     end
 end
 
-function _scale_cols!(dest::AbstractMatrix{Float64}, src::AbstractMatrix{Float64}, col_scale::Vector{Float64};
-                      threaded::Bool = false)
-    nrows, ncols = size(dest)
-    if threaded && Threads.nthreads() > 1
-        Threads.@threads for i in 1:nrows
-            @inbounds for j in 1:ncols
-                dest[i, j] = src[i, j] * col_scale[j]
-            end
-        end
-    else
-        @inbounds for i in 1:nrows, j in 1:ncols
-            dest[i, j] = src[i, j] * col_scale[j]
-        end
-    end
-    dest
-end
-
 function _fill_rw_pow!(dest::Vector{Float64}, realwages::Array{Float64,3}, t::Int, nu::Float64,
                        J::Int, R::Int)
     idx = 1
@@ -41,52 +24,17 @@ function _fill_rw_pow!(dest::Vector{Float64}, realwages::Array{Float64,3}, t::In
     dest
 end
 
-function _counterfactual_t1_update!(ws::CounterfactualWorkspace4, base::BaseState4,
-                                    Hvect::Matrix{Float64}, params::ModelParams,
+function _counterfactual_t1_update!(ws::CounterfactualWorkspace4,
+                                    Hvect::Matrix{Float64},
+                                    params::ModelParams,
                                     t1::Int)
-    RJ = length(ws.col_weights)
-
-    _fill_col_weights!(ws.col_weights, Hvect, t1, params.beta)
-    @inbounds for j in 1:RJ
-        denom = ws.hpow_noshock_t1[j]
-        ws.ratio_t1[j] = denom == 0.0 ? 1.0 : ws.col_weights[j] / denom
-    end
-    _scale_cols!(ws.mu0_tilde, ws.mu00, ws.ratio_t1)
-
-    @inbounds for i in 1:RJ
-        den_row = 0.0
-        for j in 1:RJ
-            hpow = ws.col_weights[j]
-            num1 = base.mu0[i, j] * hpow
-            ws.special_num1[i, j] = num1
-
-            d = ws.mu0_tilde[i, j]
-            denv = d == 0.0 ? 0.0 : (base.mu0[i, j] * ws.mu00[i, j] / d) * hpow
-            if !isfinite(denv)
-                denv = 0.0
-            end
-            den_row += denv
-        end
-        ws.row_sums[i] = den_row
-    end
-
-    @inbounds for i in 1:RJ
-        den_row = ws.row_sums[i]
-        inv_den = den_row == 0.0 ? 0.0 : 1.0 / den_row
-        for j in 1:RJ
-            ws.mu0_tilde[i, j] = ws.special_num1[i, j] * inv_den
-        end
-    end
-
     _fill_col_weights!(ws.hpow, Hvect, t1 + 1, params.beta)
-    @inbounds for i in 1:RJ
-        acc = 0.0
-        for j in 1:RJ
-            acc += ws.mu0_tilde[i, j] * ws.hpow[j]
-        end
-        ws.ynew[i, t1] = acc * ws.lvec[i]
-    end
+    mul!(ws.ytmp, view(ws.mu_path, :, :, t1 - 1), ws.hpow)
 
+    RJ = length(ws.col_weights)
+    @inbounds for i in 1:RJ
+        ws.ynew[i, t1] = ws.lvec[i] * ws.ytmp[i]
+    end
     ws
 end
 
@@ -124,7 +72,13 @@ function _counterfactual_outer_sweep!(base::BaseState4, params::ModelParams,
         denom = ws.hpow_noshock_t1[j]
         ws.ratio_t1[j] = denom == 0.0 ? 1.0 : ws.col_weights[j] / denom
     end
-    _scale_cols!(ws.mu0_tilde, ws.mu00, ws.ratio_t1; threaded = dynamic_threaded)
+    _scale_cols_normalize_rows!(
+        ws.mu0_tilde,
+        ws.mu00,
+        ws.ratio_t1,
+        ws.row_sums;
+        threaded = dynamic_threaded,
+    )
     @views ws.mu_path[:, :, 1] .= ws.mu0_tilde
 
     for t in 1:(time_horizon - 2)
@@ -140,7 +94,7 @@ function _counterfactual_outer_sweep!(base::BaseState4, params::ModelParams,
 
     Ldyn[:, :, 1] .= reshape(base.L0, J, R)
     ws.lvec .= reshape(base.L0, RJ)
-    mul!(ws.lnext, transpose(ws.mu00), ws.lvec)
+    mul!(ws.lnext, transpose(view(ws.mu_path, :, :, 1)), ws.lvec)
     Ldyn[:, :, 2] .= reshape(ws.lnext, J, R)
 
     for t in 2:(time_horizon - 1)
@@ -209,7 +163,7 @@ function _counterfactual_outer_sweep!(base::BaseState4, params::ModelParams,
 
     t1 = 2
     _fill_rw_pow!(ws.lvec, realwages, t1, params.nu, J, R)
-    _counterfactual_t1_update!(ws, base, Hvect, params, t1)
+    _counterfactual_t1_update!(ws, Hvect, params, t1)
 
     for t in (t1 + 1):(time_horizon - 1)
         _fill_rw_pow!(ws.lvec, realwages, t, params.nu, J, R)
@@ -277,9 +231,9 @@ function run_counterfactual_4sector(base::BaseState4, params::ModelParams;
     _anderson_reset!(acc)
 
     Ynew_last = copy(Hvect)
+    candidate_hvect = similar(Hvect)
     converged = false
     final_ymax = Inf
-    converged_streak = 0
 
     iter = 1
     while iter <= params.max_iter_dynamic
@@ -304,7 +258,7 @@ function run_counterfactual_4sector(base::BaseState4, params::ModelParams;
         final_ymax = Ymax
 
         t_rng = 2:(time_horizon - 1)
-        _record_outer_stats!(
+        _record_outer_iteration!(
             ws.outer_ymax,
             ws.outer_mean_static_iterations,
             ws.outer_max_static_iterations,
@@ -313,26 +267,54 @@ function run_counterfactual_4sector(base::BaseState4, params::ModelParams;
             static_iterations,
             static_residuals,
             t_rng,
+            params.record_trace,
+            trace_path,
         )
-        if params.record_trace
-            _write_outer_trace(
-                trace_path,
+
+        if Ymax <= params.tol_dynamic
+            candidate_hvect .= ws.ynew
+            confirm_ymax = _counterfactual_outer_sweep!(
+                base,
+                params,
+                baseline_anchor_y,
+                shocks,
+                candidate_hvect,
+                ws,
+                Ldyn,
+                realwages,
+                static_residuals,
+                static_iterations;
+                dynamic_threaded = dynamic_threaded,
+                warm_start_static = warm_start_static,
+                reset_price_guess = reset_price_guess,
+            )
+            Ynew_last .= ws.ynew
+            final_ymax = confirm_ymax
+            _record_outer_iteration!(
                 ws.outer_ymax,
                 ws.outer_mean_static_iterations,
                 ws.outer_max_static_iterations,
                 ws.outer_max_static_residual,
+                confirm_ymax,
+                static_iterations,
+                static_residuals,
+                t_rng,
+                params.record_trace,
+                trace_path,
             )
-        end
 
-        if Ymax <= params.tol_dynamic
-            converged_streak += 1
-        else
-            converged_streak = 0
-        end
+            if confirm_ymax <= params.tol_dynamic
+                converged = true
+                break
+            end
 
-        if Ymax <= params.tol_dynamic && converged_streak >= 2
-            converged = true
-            break
+            if iter == params.max_iter_dynamic
+                break
+            elseif use_anderson
+                _anderson_update!(acc, Hvect, candidate_hvect)
+            else
+                _relax_hvect!(Hvect, candidate_hvect, hvect_relax)
+            end
         elseif iter == params.max_iter_dynamic
             break
         elseif use_anderson
@@ -344,7 +326,7 @@ function run_counterfactual_4sector(base::BaseState4, params::ModelParams;
         iter += 1
     end
 
-    actual_iters = min(length(ws.outer_ymax), params.max_iter_dynamic)
+    actual_iters = length(ws.outer_ymax)
 
     if params.record_trace
         _write_outer_trace(

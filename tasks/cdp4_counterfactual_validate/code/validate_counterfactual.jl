@@ -124,7 +124,7 @@ identity_output_file = get(ENV, "IDENTITY_OUTPUT_FILE", "")
 reference_output_file = get(ENV, "REFERENCE_OUTPUT_FILE", "")
 fail_on_checks = _env_bool("FAIL_ON_CHECKS", false)
 response_tol = parse(Float64, get(ENV, "RESPONSE_TOL", "1e-12"))
-pre_activation_tol = parse(Float64, get(ENV, "PRE_ACTIVATION_TOL", "1e-12"))
+require_t1_response = _env_bool("REQUIRE_T1_RESPONSE", false)
 
 path = _load_saved_path(counterfactual_output_file)
 baseline_anchor_y = load_baseline_anchor_y(baseline_anchor_file)
@@ -179,8 +179,7 @@ validate_stats = @timed begin
                     identity_path;
                     shocks = rerun_shocks,
                     response_tol = response_tol,
-                    pre_activation_tol = pre_activation_tol,
-                    require_pre_activation_zero = false,
+                    require_t1_response = require_t1_response,
                     mode_label = mode_label,
                 ),
             )
@@ -192,8 +191,6 @@ validate_stats = @timed begin
     elseif validation_kind == "generic"
         report = validate_counterfactual_core_4sector(path; dyn_tol = tol_dynamic, mode_label = mode_label)
         if !isnothing(identity_path)
-            active_window = CDPJulia._cf_active_shock_window(rerun_shocks; tol = response_tol)
-            require_pre_activation_zero = !isnothing(active_window.first_t) && active_window.first_t > 1
             report = vcat(
                 report,
                 validate_counterfactual_response_4sector(
@@ -201,8 +198,7 @@ validate_stats = @timed begin
                     identity_path;
                     shocks = rerun_shocks,
                     response_tol = response_tol,
-                    pre_activation_tol = pre_activation_tol,
-                    require_pre_activation_zero = require_pre_activation_zero,
+                    require_t1_response = require_t1_response,
                     mode_label = mode_label,
                 ),
             )
