@@ -194,7 +194,7 @@ def main() -> None:
     default_matrix = script_dir.parents[1] / "cognitive_intensity_data" / "output" / "cognitive_intensity_matrix.csv"
     parser.add_argument("--matrix", default=str(default_matrix))
     parser.add_argument("--output-dir", default=str(script_dir.parent / "output"))
-    parser.add_argument("--delta", type=float, default=0.05)
+    parser.add_argument("--delta", type=float, default=0.01)
     parser.add_argument("--time-horizon", type=int, default=200)
     parser.add_argument("--metadata-path", default="")
     parser.add_argument("--national-sector-path", default="")

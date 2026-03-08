@@ -133,6 +133,15 @@ function load_counterfactual_shocks_4sector(base::BaseState4; time_horizon::Int 
                 error("MAT lambda_hat has size $(size(lambda_raw)); expected $(size(lambda_hat)).")
             end
             lambda_hat .= lambda_raw
+        elseif haskey(raw, "lambdas")
+            lambda_raw = _as_array3(raw["lambdas"])
+            if size(lambda_raw) == (J, N, time_horizon)
+                lambda_hat .= lambda_raw[:, :, 1:shock_periods]
+            elseif size(lambda_raw) == size(lambda_hat)
+                lambda_hat .= lambda_raw
+            else
+                error("MAT lambdas has size $(size(lambda_raw)); expected ($(J), $(N), $(time_horizon)) or $(size(lambda_hat)).")
+            end
         end
         if haskey(raw, "kappa_hat")
             kappa_raw = _as_array3(raw["kappa_hat"])

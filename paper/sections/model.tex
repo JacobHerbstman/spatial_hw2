@@ -1,0 +1,16 @@
+\section{Model}
+
+The model is a simplified dynamic spatial equilibrium over U.S. states and four sectors:
+manufacturing, construction, wholesale/retail, and services. As in \citet{caliendo2019trade},
+workers choose across location-sector labor markets subject to migration frictions, goods are
+traded with sectoral trade structure, and the model is solved in relative time differences.
+
+The quantitative implementation keeps the baseline and counterfactual recursion close to the
+MATLAB replication logic. In particular, the reference results reported here use a
+MATLAB-faithful outer-loop configuration with no Anderson acceleration, no warm-started static
+guesses, no threading, and a fixed $0.5$ relaxation update for the value-difference path.
+
+The policy object is a productivity shifter $\lambda_{jnt}$ applied to state-sector cells. The
+baseline path is unchanged, and the counterfactual changes only these productivity terms. The
+immediate scenario activates the AI shock at $t=1$, while the anticipated scenario delays
+activation until $t=21$.

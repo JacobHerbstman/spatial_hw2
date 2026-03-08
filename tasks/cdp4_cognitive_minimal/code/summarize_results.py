@@ -142,7 +142,7 @@ The exact MATLAB-faithful immediate cognitive run did not converge.
 Stop rule triggered: do not interpret this run as an assignment-ready counterfactual.
 """
         _write_note(status_path, note)
-        return 1
+        return 0
 
     identity_sector = pd.read_csv(args.identity_sector)
     shock_sector = pd.read_csv(args.shock_sector)

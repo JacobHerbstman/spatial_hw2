@@ -1,4 +1,0 @@
-.PHONY: %
-
-%:
-	$(MAKE) -C code $@

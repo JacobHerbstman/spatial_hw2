@@ -1,0 +1,13 @@
+\section{Introduction}
+
+The assignment asks for a dynamic quantitative spatial model with at least two policy timings,
+one implemented immediately and one implemented with delay so that anticipation effects can be
+measured. I focus on the AI example suggested in the prompt: a productivity increase for
+cognitive non-routine work that is uneven across state-sector labor markets. This question is a
+natural fit for a dynamic model because workers can reallocate over time, and the timing of the
+shock changes behavior even before the shock turns on.
+
+Rather than build a new model from scratch, I adapt the four-sector code path already developed
+in this repository from \citet{caliendo2019trade}. The goal is deliberately modest. I keep the
+model close to the CDP logic, validate the baseline against the MATLAB anchor, and then study
+two AI-productivity counterfactuals using the same state space and transition machinery.

@@ -1,0 +1,37 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{natbib}
+\usepackage{hyperref}
+
+\input{generated/macros.tex}
+
+\title{AI Productivity Shocks, Anticipation, and Spatial Adjustment}
+\author{Jacob Herbstman}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+This short paper studies how a productivity shock to cognitive non-routine work affects
+spatial adjustment in a simplified dynamic trade-and-migration model of U.S. states. I use
+a four-sector version of the framework in \citet{caliendo2019trade} and scale state-sector
+productivity shocks with a cognitive-intensity matrix built from O*NET, OEWS, and QCEW
+data. The quantitative exercise compares an immediate AI shock with an anticipated shock
+that starts later. The model is solved in a MATLAB-faithful reference mode, and the reported
+results come from the largest common shock size that converges in both timing scenarios.
+\end{abstract}
+
+\input{sections/introduction}
+\input{sections/model}
+\input{sections/data}
+\input{sections/counterfactual}
+
+\bibliographystyle{apalike}
+\bibliography{spatial_hw2}
+
+\end{document}

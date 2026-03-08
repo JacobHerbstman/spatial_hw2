@@ -23,6 +23,8 @@ tmp/
 **/output/**
 **/input/
 **/input/**
+**/intermediate/
+**/intermediate/**
 tasks/*/temp/*
 !**/input/.gitkeep
 !**/output/.gitkeep
@@ -33,3 +35,6 @@ tasks/*/temp/*
 *.fls
 *.synctex.gz
 *.toc
+paper/generated/
+paper/figures/
+paper/paper.pdf

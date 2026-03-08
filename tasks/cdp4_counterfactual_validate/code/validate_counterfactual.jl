@@ -122,9 +122,13 @@ counterfactual_output_file = get(ENV, "COUNTERFACTUAL_OUTPUT_FILE", "../input/co
 baseline_anchor_file = get(ENV, "BASELINE_ANCHOR_FILE", "../input/baseline_4sector_path_reference.jld2")
 identity_output_file = get(ENV, "IDENTITY_OUTPUT_FILE", "")
 reference_output_file = get(ENV, "REFERENCE_OUTPUT_FILE", "")
+fail_on_checks = _env_bool("FAIL_ON_CHECKS", false)
+response_tol = parse(Float64, get(ENV, "RESPONSE_TOL", "1e-12"))
+pre_activation_tol = parse(Float64, get(ENV, "PRE_ACTIVATION_TOL", "1e-12"))
 
 path = _load_saved_path(counterfactual_output_file)
 baseline_anchor_y = load_baseline_anchor_y(baseline_anchor_file)
+identity_path = (!isempty(identity_output_file) && isfile(identity_output_file)) ? _load_saved_path(identity_output_file) : nothing
 
 report = DataFrame()
 parity_time = DataFrame()
@@ -144,6 +148,9 @@ use_anderson = _env_optional_bool("USE_ANDERSON")
 hvect_relax = parse(Float64, get(ENV, "HVECT_RELAX", "0.5"))
 
 validate_stats = @timed begin
+    base = load_base_state_4sector("../input/Base_year_four_sectors.mat")
+    rerun_shocks = _load_shocks(base, time_horizon)
+
     if validation_kind == "identity"
         report = validate_counterfactual_identity_4sector(
             path,
@@ -156,8 +163,7 @@ validate_stats = @timed begin
     elseif validation_kind == "toy"
         report = validate_counterfactual_core_4sector(path; dyn_tol = rel_tol, mode_label = mode_label)
 
-        if !isempty(identity_output_file) && isfile(identity_output_file)
-            identity_path = _load_saved_path(identity_output_file)
+        if !isnothing(identity_path)
             y_delta = maximum(abs.(path.Ynew .- identity_path.Ynew))
             report = vcat(report, _status_row(mode_label, "toy_ynew_nonzero_vs_identity", y_delta, 1e-8, y_delta > 1e-8))
 
@@ -166,6 +172,18 @@ validate_stats = @timed begin
             id_rw = mean(identity_path.realwages[1, 1, 2:t_hi])
             rw_gap = toy_rw - id_rw
             report = vcat(report, _status_row(mode_label, "toy_rw_early_shocked_cell_gap", rw_gap, 0.0, rw_gap > 0.0))
+            report = vcat(
+                report,
+                validate_counterfactual_response_4sector(
+                    path,
+                    identity_path;
+                    shocks = rerun_shocks,
+                    response_tol = response_tol,
+                    pre_activation_tol = pre_activation_tol,
+                    require_pre_activation_zero = false,
+                    mode_label = mode_label,
+                ),
+            )
 
             parity_time = parity_by_time_counterfactual(path, identity_path.Ynew; mode_label = mode_label)
         else
@@ -173,11 +191,26 @@ validate_stats = @timed begin
         end
     elseif validation_kind == "generic"
         report = validate_counterfactual_core_4sector(path; dyn_tol = tol_dynamic, mode_label = mode_label)
+        if !isnothing(identity_path)
+            active_window = CDPJulia._cf_active_shock_window(rerun_shocks; tol = response_tol)
+            require_pre_activation_zero = !isnothing(active_window.first_t) && active_window.first_t > 1
+            report = vcat(
+                report,
+                validate_counterfactual_response_4sector(
+                    path,
+                    identity_path;
+                    shocks = rerun_shocks,
+                    response_tol = response_tol,
+                    pre_activation_tol = pre_activation_tol,
+                    require_pre_activation_zero = require_pre_activation_zero,
+                    mode_label = mode_label,
+                ),
+            )
+        end
     else
         error("Unsupported VALIDATION_KIND=$(validation_kind). Use identity, toy, or generic.")
     end
 
-    base = load_base_state_4sector("../input/Base_year_four_sectors.mat")
     params = default_model_params(
         base;
         tol_dynamic = tol_dynamic,
@@ -193,7 +226,6 @@ validate_stats = @timed begin
         record_trace = record_trace,
     )
     rerun_trace_path = "../output/outer_trace_counterfactual_4sector_validate_rerun.csv"
-    rerun_shocks = _load_shocks(base, time_horizon)
     rerun_init = validation_kind == "identity" ? baseline_anchor_y : nothing
     path_rerun = run_counterfactual_4sector(
         base,
@@ -264,5 +296,9 @@ bench = DataFrame(
 CSV.write("../output/benchmark_validate_counterfactual_4sector.csv", bench)
 CSV.write("../output/benchmark_validate_counterfactual_4sector_$(profile_tag).csv", bench)
 CSV.write("../output/benchmark_validate_counterfactual_4sector_$(profile_tag)_$(shock_tag).csv", bench)
+
+if fail_on_checks && any(report.status .== "FAIL")
+    error("Counterfactual validation checks failed for $(mode_label).")
+end
 
 println("Wrote counterfactual validation outputs to ../output")

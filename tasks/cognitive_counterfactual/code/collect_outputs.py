@@ -2,9 +2,18 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from datetime import datetime, timezone
 from pathlib import Path
+
+
+def sha256_file(path: Path) -> str:
+    hasher = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            hasher.update(chunk)
+    return hasher.hexdigest()
 
 
 def ensure_symlink(src: Path, dst: Path) -> None:
@@ -19,6 +28,10 @@ def collect_files(
     dynamics_output_dir: Path,
     validate_output_dir: Path,
     output_dir: Path,
+    lambda_file: Path | None = None,
+    delta_selection_file: Path | None = None,
+    solver_settings_file: Path | None = None,
+    baseline_validation_file: Path | None = None,
 ) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -64,7 +77,20 @@ def collect_files(
         output_dir / "lambda_anticipated.csv",
         output_dir / "shock_calibration.json",
         output_dir / "data_notes.md",
+        output_dir / "selected_reference_delta.json",
+        output_dir / "reference_solver_settings.json",
+        output_dir / "baseline_validation_reference.csv",
     ]
+    selected_delta = None
+    delta_selection_payload = None
+    if delta_selection_file is not None and delta_selection_file.exists():
+        delta_selection_payload = json.loads(delta_selection_file.read_text())
+        selected_delta = delta_selection_payload.get("selected_delta")
+
+    solver_settings_payload = None
+    if solver_settings_file is not None and solver_settings_file.exists():
+        solver_settings_payload = json.loads(solver_settings_file.read_text())
+
     manifest = {
         "scenario_name": scenario_name,
         "profile": profile,
@@ -73,8 +99,19 @@ def collect_files(
         "validate_output_dir": str(validate_output_dir.resolve()),
         "linked_outputs": linked,
         "local_outputs": [str(path.resolve()) for path in local_files if path.exists()],
+        "selected_delta": selected_delta,
+        "delta_selection_file": str(delta_selection_file.resolve()) if delta_selection_file and delta_selection_file.exists() else None,
+        "solver_settings_file": str(solver_settings_file.resolve()) if solver_settings_file and solver_settings_file.exists() else None,
+        "baseline_validation_file": str(baseline_validation_file.resolve()) if baseline_validation_file and baseline_validation_file.exists() else None,
+        "delta_selection": delta_selection_payload,
+        "solver_settings": solver_settings_payload,
     }
+    if lambda_file is not None and lambda_file.exists():
+        manifest["lambda_file"] = str(lambda_file.resolve())
+        manifest["lambda_file_sha256"] = sha256_file(lambda_file)
+
     (output_dir / f"scenario_outputs_{profile}_{scenario_name}.json").write_text(json.dumps(manifest, indent=2))
+    (output_dir / f"scenario_manifest_{profile}_{scenario_name}.json").write_text(json.dumps(manifest, indent=2))
 
 
 def main() -> None:
@@ -84,6 +121,10 @@ def main() -> None:
     parser.add_argument("--dynamics-output-dir", required=True)
     parser.add_argument("--validate-output-dir", required=True)
     parser.add_argument("--output-dir", required=True)
+    parser.add_argument("--lambda-file", default="")
+    parser.add_argument("--delta-selection-file", default="")
+    parser.add_argument("--solver-settings-file", default="")
+    parser.add_argument("--baseline-validation-file", default="")
     args = parser.parse_args()
 
     collect_files(
@@ -92,6 +133,10 @@ def main() -> None:
         dynamics_output_dir=Path(args.dynamics_output_dir).resolve(),
         validate_output_dir=Path(args.validate_output_dir).resolve(),
         output_dir=Path(args.output_dir).resolve(),
+        lambda_file=Path(args.lambda_file).resolve() if args.lambda_file else None,
+        delta_selection_file=Path(args.delta_selection_file).resolve() if args.delta_selection_file else None,
+        solver_settings_file=Path(args.solver_settings_file).resolve() if args.solver_settings_file else None,
+        baseline_validation_file=Path(args.baseline_validation_file).resolve() if args.baseline_validation_file else None,
     )
 
 

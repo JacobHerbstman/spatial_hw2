@@ -6,6 +6,31 @@ function _cf_bool_to_str(x::Bool)
     x ? "PASS" : "FAIL"
 end
 
+function _cf_max_abs_diff(a::AbstractArray{<:Real}, b::AbstractArray{<:Real})
+    maximum(abs.(a .- b))
+end
+
+function _cf_max_abs_diff_t(a::AbstractArray{<:Real, 3}, b::AbstractArray{<:Real, 3}, t_rng)
+    isempty(t_rng) ? 0.0 : maximum(abs.(view(a, :, :, t_rng) .- view(b, :, :, t_rng)))
+end
+
+function _cf_active_shock_window(shocks::CounterfactualShocks4; tol::Float64 = 1e-12)
+    first_t = nothing
+    last_t = nothing
+    T = size(shocks.lambda_hat, 3)
+    @inbounds for t in 1:T
+        λ_active = maximum(abs.(view(shocks.lambda_hat, :, :, t) .- 1.0)) > tol
+        κ_active = maximum(abs.(view(shocks.kappa_hat, :, :, t) .- 1.0)) > tol
+        if λ_active || κ_active
+            if isnothing(first_t)
+                first_t = t
+            end
+            last_t = t
+        end
+    end
+    (first_t = first_t, last_t = last_t)
+end
+
 function _cf_rows()
     Vector{NamedTuple{(:mode, :check, :value, :threshold, :status),
                       Tuple{String, String, Float64, Float64, String}}}()
@@ -93,4 +118,61 @@ end
 function fast_reference_delta_counterfactual(path_fast::CounterfactualPath4,
                                              path_reference::CounterfactualPath4)
     maximum(abs.(path_fast.Ynew .- path_reference.Ynew))
+end
+
+function validate_counterfactual_response_4sector(path::CounterfactualPath4,
+                                                  identity_path::CounterfactualPath4;
+                                                  shocks::Union{Nothing, CounterfactualShocks4} = nothing,
+                                                  response_tol::Float64 = 1e-12,
+                                                  pre_activation_tol::Float64 = 1e-12,
+                                                  require_pre_activation_zero::Bool = false,
+                                                  mode_label::AbstractString = "counterfactual")
+    if size(path.Ynew) != size(identity_path.Ynew) ||
+       size(path.mu_path) != size(identity_path.mu_path) ||
+       size(path.Ldyn) != size(identity_path.Ldyn) ||
+       size(path.realwages) != size(identity_path.realwages)
+        error("Counterfactual and identity paths have mismatched dimensions.")
+    end
+
+    rows = _cf_rows()
+
+    max_abs_Y = _cf_max_abs_diff(path.Ynew, identity_path.Ynew)
+    max_abs_rw = _cf_max_abs_diff(path.realwages, identity_path.realwages)
+    max_abs_L = _cf_max_abs_diff(path.Ldyn, identity_path.Ldyn)
+    max_abs_mu = _cf_max_abs_diff(path.mu_path, identity_path.mu_path)
+
+    push!(rows, (String(mode_label), "max_abs_Y_diff_vs_identity", max_abs_Y, response_tol, _cf_bool_to_str(max_abs_Y > response_tol)))
+    push!(rows, (String(mode_label), "max_abs_realwage_diff_vs_identity", max_abs_rw, response_tol, _cf_bool_to_str(max_abs_rw > response_tol)))
+    push!(rows, (String(mode_label), "max_abs_Ldyn_diff_vs_identity", max_abs_L, response_tol, _cf_bool_to_str(max_abs_L > response_tol)))
+    push!(rows, (String(mode_label), "max_abs_mu_diff_vs_identity", max_abs_mu, response_tol, _cf_bool_to_str(max_abs_mu > response_tol)))
+
+    stale_path = (max_abs_Y > response_tol || max_abs_rw > response_tol) &&
+                 max_abs_L <= response_tol &&
+                 max_abs_mu <= response_tol
+    push!(rows, (String(mode_label), "stale_path_response_gate", stale_path ? 0.0 : 1.0, 1.0, _cf_bool_to_str(!stale_path)))
+
+    response_gate = max_abs_L > response_tol && max_abs_mu > response_tol
+    push!(rows, (String(mode_label), "nonidentity_response_gate", response_gate ? 1.0 : 0.0, 1.0, _cf_bool_to_str(response_gate)))
+
+    if !isnothing(shocks)
+        active = _cf_active_shock_window(shocks; tol = response_tol)
+        if !isnothing(active.first_t) && active.first_t > 1
+            # Temporary-equilibrium shocks at period t affect path objects dated t+1.
+            response_start_t = min(size(path.Ynew, 2), active.first_t + 1)
+            pre_rng = 1:(response_start_t - 1)
+            post_rng = response_start_t:(size(path.Ynew, 2) - 1)
+
+            pre_L = _cf_max_abs_diff_t(path.Ldyn, identity_path.Ldyn, pre_rng)
+            pre_mu = _cf_max_abs_diff_t(path.mu_path, identity_path.mu_path, pre_rng)
+            post_L = _cf_max_abs_diff_t(path.Ldyn, identity_path.Ldyn, post_rng)
+            post_mu = _cf_max_abs_diff_t(path.mu_path, identity_path.mu_path, post_rng)
+
+            push!(rows, (String(mode_label), "pre_activation_max_abs_Ldyn_diff_vs_identity", pre_L, pre_activation_tol, _cf_bool_to_str(!require_pre_activation_zero || pre_L <= pre_activation_tol)))
+            push!(rows, (String(mode_label), "pre_activation_max_abs_mu_diff_vs_identity", pre_mu, pre_activation_tol, _cf_bool_to_str(!require_pre_activation_zero || pre_mu <= pre_activation_tol)))
+            push!(rows, (String(mode_label), "post_activation_max_abs_Ldyn_diff_vs_identity", post_L, response_tol, _cf_bool_to_str(post_L > response_tol)))
+            push!(rows, (String(mode_label), "post_activation_max_abs_mu_diff_vs_identity", post_mu, response_tol, _cf_bool_to_str(post_mu > response_tol)))
+        end
+    end
+
+    DataFrame(rows)
 end

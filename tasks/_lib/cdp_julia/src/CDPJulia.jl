@@ -40,6 +40,7 @@ export ModelDims,
        deterministic_delta,
        validate_counterfactual_core_4sector,
        validate_counterfactual_identity_4sector,
+       validate_counterfactual_response_4sector,
        parity_by_time_counterfactual,
        deterministic_delta_counterfactual,
        fast_reference_delta_counterfactual

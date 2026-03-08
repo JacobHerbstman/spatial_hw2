@@ -90,6 +90,139 @@ function _counterfactual_t1_update!(ws::CounterfactualWorkspace4, base::BaseStat
     ws
 end
 
+function _counterfactual_outer_sweep!(base::BaseState4, params::ModelParams,
+                                      baseline_anchor_y::Matrix{Float64},
+                                      shocks::CounterfactualShocks4,
+                                      Hvect::Matrix{Float64},
+                                      ws::CounterfactualWorkspace4,
+                                      Ldyn::Array{Float64, 3},
+                                      realwages::Array{Float64, 3},
+                                      static_residuals::Vector{Float64},
+                                      static_iterations::Vector{Int};
+                                      dynamic_threaded::Bool = false,
+                                      warm_start_static::Bool = false,
+                                      reset_price_guess::Bool = true)
+    J, N, R = base.dims.J, base.dims.N, base.dims.R
+    time_horizon = size(Hvect, 2)
+    RJ = R * J
+
+    fill!(static_residuals, 0.0)
+    fill!(static_iterations, 0)
+
+    _fill_col_weights!(ws.col_weights, baseline_anchor_y, 2, params.beta)
+    ws.hpow_noshock_t1 .= ws.col_weights
+    _scale_cols_normalize_rows!(
+        ws.mu00,
+        base.mu0,
+        ws.col_weights,
+        ws.row_sums;
+        threaded = dynamic_threaded,
+    )
+
+    _fill_col_weights!(ws.col_weights, Hvect, 2, params.beta)
+    @inbounds for j in 1:RJ
+        denom = ws.hpow_noshock_t1[j]
+        ws.ratio_t1[j] = denom == 0.0 ? 1.0 : ws.col_weights[j] / denom
+    end
+    _scale_cols!(ws.mu0_tilde, ws.mu00, ws.ratio_t1; threaded = dynamic_threaded)
+    @views ws.mu_path[:, :, 1] .= ws.mu0_tilde
+
+    for t in 1:(time_horizon - 2)
+        _fill_col_weights!(ws.col_weights, Hvect, t + 2, params.beta)
+        _scale_cols_normalize_rows!(
+            view(ws.mu_path, :, :, t + 1),
+            view(ws.mu_path, :, :, t),
+            ws.col_weights,
+            ws.row_sums;
+            threaded = dynamic_threaded,
+        )
+    end
+
+    Ldyn[:, :, 1] .= reshape(base.L0, J, R)
+    ws.lvec .= reshape(base.L0, RJ)
+    mul!(ws.lnext, transpose(ws.mu00), ws.lvec)
+    Ldyn[:, :, 2] .= reshape(ws.lnext, J, R)
+
+    for t in 2:(time_horizon - 1)
+        ws.lvec .= reshape(view(Ldyn, :, :, t), RJ)
+        mul!(ws.lnext, transpose(view(ws.mu_path, :, :, t)), ws.lvec)
+        Ldyn[:, :, t + 1] .= reshape(ws.lnext, J, R)
+    end
+    Ldyn[:, :, time_horizon] .= 0.0
+
+    ws.VALjn0 .= base.VALjn00
+    ws.VARjn0 .= base.VARjn00
+    ws.Sn0 .= base.Sn00
+    ws.Din0 .= base.Din00
+
+    for t in 1:(time_horizon - 2)
+        if t % 25 == 0
+            println("  Solving temporary equilibrium at t=$(t)")
+        end
+        fill!(ws.snp, 0.0)
+        fill!(ws.ljn_hat, 1.0)
+        @inbounds for r in 1:R, j in 1:J
+            ws.ljn_hat[j, r] = _safe_ratio(Ldyn[j, r, t + 1], Ldyn[j, r, t])
+        end
+
+        ws.kappa_hat .= view(shocks.kappa_hat, :, :, t)
+        ws.lambda_hat .= view(shocks.lambda_hat, :, :, t)
+
+        if warm_start_static
+            @views ws.om_init .= ws.om_guesses[:, :, t]
+        else
+            fill!(ws.om_init, 1.0)
+        end
+
+        temp = solve_temporary_equilibrium_inplace!(
+            base,
+            ws.ljn_hat,
+            ws.VARjn0,
+            ws.VALjn0,
+            ws.Din0,
+            ws.snp;
+            kappa_hat = ws.kappa_hat,
+            lambda_hat = ws.lambda_hat,
+            params = params,
+            om_init = ws.om_init,
+            workspace = ws.temp_ws,
+            reset_price_guess = reset_price_guess,
+        )
+
+        ws.VALjn0 .= temp.VALjn
+        ws.VARjn0 .= temp.VARjn
+        ws.Sn0 .= temp.Sn
+        ws.Din0 .= temp.Din
+        if warm_start_static
+            @views ws.om_guesses[:, :, t] .= temp.om
+        end
+
+        @inbounds for n in 1:N, j in 1:J
+            realwages[j, n, t + 1] = temp.wf[j, n] / temp.Pidx[n]
+        end
+        static_residuals[t + 1] = temp.residual
+        static_iterations[t + 1] = temp.iterations
+    end
+
+    fill!(ws.ynew, 0.0)
+    ws.ynew[:, time_horizon] .= 1.0
+
+    t1 = 2
+    _fill_rw_pow!(ws.lvec, realwages, t1, params.nu, J, R)
+    _counterfactual_t1_update!(ws, base, Hvect, params, t1)
+
+    for t in (t1 + 1):(time_horizon - 1)
+        _fill_rw_pow!(ws.lvec, realwages, t, params.nu, J, R)
+        _fill_col_weights!(ws.hpow, Hvect, t + 1, params.beta)
+        mul!(ws.ytmp, view(ws.mu_path, :, :, t - 1), ws.hpow)
+        @inbounds for i in 1:RJ
+            ws.ynew[i, t] = ws.lvec[i] * ws.ytmp[i]
+        end
+    end
+
+    _compute_ymax!(ws.checky, ws.ynew, Hvect; t_start = 1)
+end
+
 function run_counterfactual_4sector(base::BaseState4, params::ModelParams;
                                     baseline_anchor_y::Matrix{Float64},
                                     shocks::CounterfactualShocks4,
@@ -143,150 +276,44 @@ function run_counterfactual_4sector(base::BaseState4, params::ModelParams;
     acc = AndersonAccelerator(RJ * time_horizon; m = 5, beta = hvect_relax, ridge = 1e-10)
     _anderson_reset!(acc)
 
-    _fill_col_weights!(ws.col_weights, baseline_anchor_y, 2, params.beta)
-    ws.hpow_noshock_t1 .= ws.col_weights
-    _scale_cols_normalize_rows!(
-        ws.mu00,
-        base.mu0,
-        ws.col_weights,
-        ws.row_sums;
-        threaded = dynamic_threaded,
-    )
-
     Ynew_last = copy(Hvect)
     converged = false
     final_ymax = Inf
+    converged_streak = 0
 
     iter = 1
     while iter <= params.max_iter_dynamic
         println("Counterfactual outer iteration $(iter)")
-
-        fill!(static_residuals, 0.0)
-        fill!(static_iterations, 0)
-
-        _fill_col_weights!(ws.col_weights, Hvect, 2, params.beta)
-        @inbounds for j in 1:RJ
-            denom = ws.hpow_noshock_t1[j]
-            ws.ratio_t1[j] = denom == 0.0 ? 1.0 : ws.col_weights[j] / denom
-        end
-        _scale_cols!(ws.mu0_tilde, ws.mu00, ws.ratio_t1; threaded = dynamic_threaded)
-        @views ws.mu_path[:, :, 1] .= ws.mu0_tilde
-
-        for t in 1:(time_horizon - 2)
-            _fill_col_weights!(ws.col_weights, Hvect, t + 2, params.beta)
-            _scale_cols_normalize_rows!(
-                view(ws.mu_path, :, :, t + 1),
-                view(ws.mu_path, :, :, t),
-                ws.col_weights,
-                ws.row_sums;
-                threaded = dynamic_threaded,
-            )
-        end
-
-        Ldyn[:, :, 1] .= reshape(base.L0, J, R)
-        ws.lvec .= reshape(base.L0, RJ)
-        mul!(ws.lnext, transpose(ws.mu00), ws.lvec)
-        Ldyn[:, :, 2] .= reshape(ws.lnext, J, R)
-
-        for t in 2:(time_horizon - 1)
-            ws.lvec .= reshape(view(Ldyn, :, :, t), RJ)
-            mul!(ws.lnext, transpose(view(ws.mu_path, :, :, t)), ws.lvec)
-            Ldyn[:, :, t + 1] .= reshape(ws.lnext, J, R)
-        end
-        Ldyn[:, :, time_horizon] .= 0.0
-
-        ws.VALjn0 .= base.VALjn00
-        ws.VARjn0 .= base.VARjn00
-        ws.Sn0 .= base.Sn00
-        ws.Din0 .= base.Din00
-
-        for t in 1:(time_horizon - 2)
-            if t % 25 == 0
-                println("  Solving temporary equilibrium at t=$(t)")
-            end
-            fill!(ws.snp, 0.0)
-            fill!(ws.ljn_hat, 1.0)
-            @inbounds for r in 1:R, j in 1:J
-                ws.ljn_hat[j, r] = _safe_ratio(Ldyn[j, r, t + 1], Ldyn[j, r, t])
-            end
-
-            ws.kappa_hat .= view(shocks.kappa_hat, :, :, t)
-            ws.lambda_hat .= view(shocks.lambda_hat, :, :, t)
-
-            if warm_start_static
-                @views ws.om_init .= ws.om_guesses[:, :, t]
-            else
-                fill!(ws.om_init, 1.0)
-            end
-
-            temp = solve_temporary_equilibrium_inplace!(
-                base,
-                ws.ljn_hat,
-                ws.VARjn0,
-                ws.VALjn0,
-                ws.Din0,
-                ws.snp;
-                kappa_hat = ws.kappa_hat,
-                lambda_hat = ws.lambda_hat,
-                params = params,
-                om_init = ws.om_init,
-                workspace = ws.temp_ws,
-                reset_price_guess = reset_price_guess,
-            )
-
-            ws.VALjn0 .= temp.VALjn
-            ws.VARjn0 .= temp.VARjn
-            ws.Sn0 .= temp.Sn
-            ws.Din0 .= temp.Din
-            if warm_start_static
-                @views ws.om_guesses[:, :, t] .= temp.om
-            end
-
-            @inbounds for n in 1:N, j in 1:J
-                realwages[j, n, t + 1] = temp.wf[j, n] / temp.Pidx[n]
-            end
-            static_residuals[t + 1] = temp.residual
-            static_iterations[t + 1] = temp.iterations
-        end
-
-        fill!(ws.ynew, 0.0)
-        ws.ynew[:, time_horizon] .= 1.0
-        Hvect[:, time_horizon] .= 1.0
-
-        t1 = 2
-        _fill_rw_pow!(ws.lvec, realwages, t1, params.nu, J, R)
-        _counterfactual_t1_update!(ws, base, Hvect, params, t1)
-
-        for t in (t1 + 1):(time_horizon - 1)
-            _fill_rw_pow!(ws.lvec, realwages, t, params.nu, J, R)
-            _fill_col_weights!(ws.hpow, Hvect, t + 1, params.beta)
-            mul!(ws.ytmp, view(ws.mu_path, :, :, t - 1), ws.hpow)
-            @inbounds for i in 1:RJ
-                ws.ynew[i, t] = ws.lvec[i] * ws.ytmp[i]
-            end
-        end
-
-        fill!(ws.checky, 0.0)
-        @inbounds for t in 1:time_horizon
-            m = 0.0
-            for i in 1:RJ
-                dev = abs(ws.ynew[i, t] - Hvect[i, t])
-                if dev > m
-                    m = dev
-                end
-            end
-            ws.checky[t] = m
-        end
-        Ymax = maximum(ws.checky)
+        Ymax = _counterfactual_outer_sweep!(
+            base,
+            params,
+            baseline_anchor_y,
+            shocks,
+            Hvect,
+            ws,
+            Ldyn,
+            realwages,
+            static_residuals,
+            static_iterations;
+            dynamic_threaded = dynamic_threaded,
+            warm_start_static = warm_start_static,
+            reset_price_guess = reset_price_guess,
+        )
 
         Ynew_last .= ws.ynew
         final_ymax = Ymax
 
         t_rng = 2:(time_horizon - 1)
-        push!(ws.outer_ymax, Ymax)
-        push!(ws.outer_mean_static_iterations, mean(static_iterations[t_rng]))
-        push!(ws.outer_max_static_iterations, maximum(static_iterations[t_rng]))
-        push!(ws.outer_max_static_residual, maximum(static_residuals[t_rng]))
+        _record_outer_stats!(
+            ws.outer_ymax,
+            ws.outer_mean_static_iterations,
+            ws.outer_max_static_iterations,
+            ws.outer_max_static_residual,
+            Ymax,
+            static_iterations,
+            static_residuals,
+            t_rng,
+        )
         if params.record_trace
             _write_outer_trace(
                 trace_path,
@@ -298,7 +325,15 @@ function run_counterfactual_4sector(base::BaseState4, params::ModelParams;
         end
 
         if Ymax <= params.tol_dynamic
+            converged_streak += 1
+        else
+            converged_streak = 0
+        end
+
+        if Ymax <= params.tol_dynamic && converged_streak >= 2
             converged = true
+            break
+        elseif iter == params.max_iter_dynamic
             break
         elseif use_anderson
             _anderson_update!(acc, Hvect, ws.ynew)
@@ -309,7 +344,7 @@ function run_counterfactual_4sector(base::BaseState4, params::ModelParams;
         iter += 1
     end
 
-    actual_iters = converged ? iter : min(iter - 1, params.max_iter_dynamic)
+    actual_iters = min(length(ws.outer_ymax), params.max_iter_dynamic)
 
     if params.record_trace
         _write_outer_trace(

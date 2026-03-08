@@ -1,0 +1,14 @@
+\section{Data and Calibration}
+
+The state-sector shock matrix is built from public task and employment data. Cognitive
+non-routine intensity is measured using O*NET work-activity importance scores and then mapped to
+industry employment from OEWS and QCEW to obtain a state-sector intensity matrix. The final
+counterfactual scales productivity according to this matrix, so high-intensity services markets
+receive larger boosts than low-intensity cells.
+
+The baseline state variables and transition objects come from the four-sector CDP replication
+files bundled locally in the untracked reference-data directories. The baseline reference build
+still matches the MATLAB anchor closely, which is a necessary condition for treating the AI
+exercise as a meaningful extension of the validated baseline rather than a separate toy model.
+
+\input{generated/table_baseline_validation.tex}

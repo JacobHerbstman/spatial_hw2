@@ -89,6 +89,41 @@ function _write_outer_trace(trace_path::Union{Nothing, AbstractString},
     nothing
 end
 
+function _compute_ymax!(checky::Vector{Float64}, ynew::Matrix{Float64}, hvect::Matrix{Float64};
+                        t_start::Int = 1)
+    fill!(checky, 0.0)
+    ymax = 0.0
+    @inbounds for t in t_start:size(ynew, 2)
+        m = 0.0
+        for i in axes(ynew, 1)
+            dev = abs(ynew[i, t] - hvect[i, t])
+            if dev > m
+                m = dev
+            end
+        end
+        checky[t] = m
+        if m > ymax
+            ymax = m
+        end
+    end
+    ymax
+end
+
+function _record_outer_stats!(outer_ymax::Vector{Float64},
+                              outer_mean_static_iterations::Vector{Float64},
+                              outer_max_static_iterations::Vector{Int},
+                              outer_max_static_residual::Vector{Float64},
+                              Ymax::Float64,
+                              static_iterations::Vector{Int},
+                              static_residuals::Vector{Float64},
+                              t_rng)
+    push!(outer_ymax, Ymax)
+    push!(outer_mean_static_iterations, mean(static_iterations[t_rng]))
+    push!(outer_max_static_iterations, maximum(static_iterations[t_rng]))
+    push!(outer_max_static_residual, maximum(static_residuals[t_rng]))
+    nothing
+end
+
 function _anderson_update!(acc::AndersonAccelerator, x::Matrix{Float64}, g::Matrix{Float64})
     if length(x) != acc.n || length(g) != acc.n
         error("Anderson state size mismatch: expected n=$(acc.n), got $(length(x)) and $(length(g)).")
@@ -179,6 +214,129 @@ function _anderson_update!(acc::AndersonAccelerator, x::Matrix{Float64}, g::Matr
     true
 end
 
+function _baseline_outer_sweep!(base::BaseState4, params::ModelParams, Hvect::Matrix{Float64},
+                                ws::BaselineWorkspace4,
+                                mu_path::Array{Float64, 3},
+                                Ldyn::Array{Float64, 3},
+                                realwages::Array{Float64, 3},
+                                static_residuals::Vector{Float64},
+                                static_iterations::Vector{Int};
+                                dynamic_threaded::Bool = false,
+                                warm_start_static::Bool = false,
+                                reset_price_guess::Bool = true)
+    J, N, R = base.dims.J, base.dims.N, base.dims.R
+    time_horizon = size(Hvect, 2)
+    RJ = R * J
+
+    fill!(static_residuals, 0.0)
+    fill!(static_iterations, 0)
+
+    _fill_col_weights!(ws.col_weights, Hvect, 2, params.beta)
+    _scale_cols_normalize_rows!(
+        view(mu_path, :, :, 1),
+        base.mu0,
+        ws.col_weights,
+        ws.row_sums;
+        threaded = dynamic_threaded,
+    )
+
+    for t in 1:(time_horizon - 2)
+        _fill_col_weights!(ws.col_weights, Hvect, t + 2, params.beta)
+        _scale_cols_normalize_rows!(
+            view(mu_path, :, :, t + 1),
+            view(mu_path, :, :, t),
+            ws.col_weights,
+            ws.row_sums;
+            threaded = dynamic_threaded,
+        )
+    end
+
+    Ldyn[:, :, 1] .= reshape(base.L0, J, R)
+    ws.lvec .= reshape(base.L0, RJ)
+    mul!(ws.lnext, transpose(view(mu_path, :, :, 1)), ws.lvec)
+    Ldyn[:, :, 2] .= reshape(ws.lnext, J, R)
+
+    for t in 2:(time_horizon - 1)
+        ws.lvec .= reshape(view(Ldyn, :, :, t), RJ)
+        mul!(ws.lnext, transpose(view(mu_path, :, :, t)), ws.lvec)
+        Ldyn[:, :, t + 1] .= reshape(ws.lnext, J, R)
+    end
+    Ldyn[:, :, time_horizon] .= 0.0
+
+    VALjn0 = copy(base.VALjn00)
+    VARjn0 = copy(base.VARjn00)
+    Sn = copy(base.Sn00)
+    Din = copy(base.Din00)
+
+    fill!(ws.kappa_hat, 1.0)
+    fill!(ws.lambda_hat, 1.0)
+
+    for t in 1:(time_horizon - 2)
+        if t % 25 == 0
+            println("  Solving temporary equilibrium at t=$(t)")
+        end
+        fill!(ws.snp, 0.0)
+        fill!(ws.ljn_hat, 1.0)
+        @inbounds for r in 1:R, j in 1:J
+            ws.ljn_hat[j, r] = _safe_ratio(Ldyn[j, r, t + 1], Ldyn[j, r, t])
+        end
+
+        if warm_start_static
+            @views ws.om_init .= ws.om_guesses[:, :, t]
+        else
+            fill!(ws.om_init, 1.0)
+        end
+
+        temp = solve_temporary_equilibrium_inplace!(
+            base,
+            ws.ljn_hat,
+            VARjn0,
+            VALjn0,
+            Din,
+            ws.snp;
+            kappa_hat = ws.kappa_hat,
+            lambda_hat = ws.lambda_hat,
+            params = params,
+            om_init = ws.om_init,
+            workspace = ws.temp_ws,
+            reset_price_guess = reset_price_guess,
+        )
+
+        VALjn0 .= temp.VALjn
+        VARjn0 .= temp.VARjn
+        Sn .= temp.Sn
+        Din .= temp.Din
+        if warm_start_static
+            @views ws.om_guesses[:, :, t] .= temp.om
+        end
+
+        @inbounds for n in 1:N, j in 1:J
+            realwages[j, n, t + 1] = temp.wf[j, n] / temp.Pidx[n]
+        end
+        static_residuals[t + 1] = temp.residual
+        static_iterations[t + 1] = temp.iterations
+    end
+
+    fill!(ws.ynew, 0.0)
+    ws.ynew[:, time_horizon] .= 1.0
+
+    for t in 2:(time_horizon - 1)
+        idx = 1
+        @inbounds for r in 1:R, j in 1:J
+            ws.lvec[idx] = realwages[j, r, t] ^ (1.0 / params.nu)
+            ws.hpow[idx] = Hvect[idx, t + 1] ^ params.beta
+            idx += 1
+        end
+        # MATLAB reference: Y_i,t = rw_i,t * sum_j mu_{i,j,t-1} * H_j,t+1^beta
+        mul!(ws.ytmp, view(mu_path, :, :, t - 1), ws.hpow)
+        @inbounds for i in 1:RJ
+            ws.ynew[i, t] = ws.lvec[i] * ws.ytmp[i]
+        end
+    end
+
+    _compute_ymax!(ws.checky, ws.ynew, Hvect; t_start = 2)
+end
+
 function run_baseline_4sector(base::BaseState4, params::ModelParams; time_horizon::Int = 200,
                               y_init::Union{Nothing, Matrix{Float64}} = nothing,
                               workspace::Union{Nothing, BaselineWorkspace4} = nothing,
@@ -223,139 +381,40 @@ function run_baseline_4sector(base::BaseState4, params::ModelParams; time_horizo
     Ynew_last = copy(Hvect)
     converged = false
     final_ymax = Inf
+    converged_streak = 0
 
     iter = 1
     while (iter <= params.max_iter_dynamic)
         println("Baseline outer iteration $(iter)")
-
-        fill!(static_residuals, 0.0)
-        fill!(static_iterations, 0)
-
-        _fill_col_weights!(ws.col_weights, Hvect, 2, params.beta)
-        _scale_cols_normalize_rows!(
-            view(mu_path, :, :, 1),
-            base.mu0,
-            ws.col_weights,
-            ws.row_sums;
-            threaded = dynamic_threaded,
+        Ymax = _baseline_outer_sweep!(
+            base,
+            params,
+            Hvect,
+            ws,
+            mu_path,
+            Ldyn,
+            realwages,
+            static_residuals,
+            static_iterations;
+            dynamic_threaded = dynamic_threaded,
+            warm_start_static = warm_start_static,
+            reset_price_guess = reset_price_guess,
         )
-
-        for t in 1:(time_horizon - 2)
-            _fill_col_weights!(ws.col_weights, Hvect, t + 2, params.beta)
-            _scale_cols_normalize_rows!(
-                view(mu_path, :, :, t + 1),
-                view(mu_path, :, :, t),
-                ws.col_weights,
-                ws.row_sums;
-                threaded = dynamic_threaded,
-            )
-        end
-
-        Ldyn[:, :, 1] .= reshape(base.L0, J, R)
-        ws.lvec .= reshape(base.L0, RJ)
-        mul!(ws.lnext, transpose(view(mu_path, :, :, 1)), ws.lvec)
-        Ldyn[:, :, 2] .= reshape(ws.lnext, J, R)
-
-        for t in 2:(time_horizon - 1)
-            ws.lvec .= reshape(view(Ldyn, :, :, t), RJ)
-            mul!(ws.lnext, transpose(view(mu_path, :, :, t)), ws.lvec)
-            Ldyn[:, :, t + 1] .= reshape(ws.lnext, J, R)
-        end
-        Ldyn[:, :, time_horizon] .= 0.0
-
-        VALjn0 = copy(base.VALjn00)
-        VARjn0 = copy(base.VARjn00)
-        Sn = copy(base.Sn00)
-        Din = copy(base.Din00)
-
-        fill!(ws.kappa_hat, 1.0)
-        fill!(ws.lambda_hat, 1.0)
-
-        for t in 1:(time_horizon - 2)
-            if t % 25 == 0
-                println("  Solving temporary equilibrium at t=$(t)")
-            end
-            fill!(ws.snp, 0.0)
-            fill!(ws.ljn_hat, 1.0)
-            @inbounds for r in 1:R, j in 1:J
-                ws.ljn_hat[j, r] = _safe_ratio(Ldyn[j, r, t + 1], Ldyn[j, r, t])
-            end
-
-            if warm_start_static
-                @views ws.om_init .= ws.om_guesses[:, :, t]
-            else
-                fill!(ws.om_init, 1.0)
-            end
-
-            temp = solve_temporary_equilibrium_inplace!(
-                base,
-                ws.ljn_hat,
-                VARjn0,
-                VALjn0,
-                Din,
-                ws.snp;
-                kappa_hat = ws.kappa_hat,
-                lambda_hat = ws.lambda_hat,
-                params = params,
-                om_init = ws.om_init,
-                workspace = ws.temp_ws,
-                reset_price_guess = reset_price_guess,
-            )
-
-            VALjn0 .= temp.VALjn
-            VARjn0 .= temp.VARjn
-            Sn .= temp.Sn
-            Din .= temp.Din
-            if warm_start_static
-                @views ws.om_guesses[:, :, t] .= temp.om
-            end
-
-            @inbounds for n in 1:N, j in 1:J
-                realwages[j, n, t + 1] = temp.wf[j, n] / temp.Pidx[n]
-            end
-            static_residuals[t + 1] = temp.residual
-            static_iterations[t + 1] = temp.iterations
-        end
-
-        fill!(ws.ynew, 0.0)
-        ws.ynew[:, time_horizon] .= 1.0
-        Hvect[:, time_horizon] .= 1.0
-
-        for t in 2:(time_horizon - 1)
-            idx = 1
-            @inbounds for r in 1:R, j in 1:J
-                ws.lvec[idx] = realwages[j, r, t] ^ (1.0 / params.nu)
-                ws.hpow[idx] = Hvect[idx, t + 1] ^ params.beta
-                idx += 1
-            end
-            # MATLAB reference: Y_i,t = rw_i,t * sum_j mu_{i,j,t-1} * H_j,t+1^beta
-            mul!(ws.ytmp, view(mu_path, :, :, t - 1), ws.hpow)
-            @inbounds for i in 1:RJ
-                ws.ynew[i, t] = ws.lvec[i] * ws.ytmp[i]
-            end
-        end
-
-        fill!(ws.checky, 0.0)
-        @inbounds for t in 2:time_horizon
-            m = 0.0
-            for i in 1:RJ
-                dev = abs(ws.ynew[i, t] - Hvect[i, t])
-                if dev > m
-                    m = dev
-                end
-            end
-            ws.checky[t] = m
-        end
-        Ymax = maximum(ws.checky)
 
         Ynew_last .= ws.ynew
         final_ymax = Ymax
 
         t_rng = 2:(time_horizon - 1)
-        push!(ws.outer_ymax, Ymax)
-        push!(ws.outer_mean_static_iterations, mean(static_iterations[t_rng]))
-        push!(ws.outer_max_static_iterations, maximum(static_iterations[t_rng]))
-        push!(ws.outer_max_static_residual, maximum(static_residuals[t_rng]))
+        _record_outer_stats!(
+            ws.outer_ymax,
+            ws.outer_mean_static_iterations,
+            ws.outer_max_static_iterations,
+            ws.outer_max_static_residual,
+            Ymax,
+            static_iterations,
+            static_residuals,
+            t_rng,
+        )
         if params.record_trace
             _write_outer_trace(
                 trace_path,
@@ -367,7 +426,15 @@ function run_baseline_4sector(base::BaseState4, params::ModelParams; time_horizo
         end
 
         if Ymax <= params.tol_dynamic
+            converged_streak += 1
+        else
+            converged_streak = 0
+        end
+
+        if Ymax <= params.tol_dynamic && converged_streak >= 2
             converged = true
+            break
+        elseif iter == params.max_iter_dynamic
             break
         elseif use_anderson
             _anderson_update!(acc, Hvect, ws.ynew)
@@ -378,7 +445,7 @@ function run_baseline_4sector(base::BaseState4, params::ModelParams; time_horizo
         iter += 1
     end
 
-    actual_iters = converged ? iter : min(iter - 1, params.max_iter_dynamic)
+    actual_iters = min(length(ws.outer_ymax), params.max_iter_dynamic)
 
     if params.record_trace
         _write_outer_trace(

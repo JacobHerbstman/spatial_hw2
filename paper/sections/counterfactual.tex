@@ -1,0 +1,32 @@
+\section{Counterfactual Design and Results}
+
+The canonical submission pipeline searches over a small ladder of common shock sizes and keeps
+the largest value that converges in both timing scenarios. The selected common shock size is
+$\Delta=\SelectedDelta$. This choice reflects the assignment's emphasis on a working dynamic
+model rather than on forcing a larger but unstable shock through the solver.
+
+\input{generated/table_ai_results.tex}
+
+The table shows the intended timing contrast. In the immediate scenario, the focus labor market
+experiences positive early real-wage effects right away. In the anticipated scenario, the early
+window is close to zero by construction, while the middle and late windows pick up once the
+shock activates. That difference is the core anticipation result in this simplified exercise.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.48\textwidth]{figures/dynamics_immediate.pdf}
+    \includegraphics[width=0.48\textwidth]{figures/dynamics_anticipated.pdf}
+    \caption{Dynamic adjustment under immediate and anticipated AI productivity shocks.}
+    \label{fig:dynamics}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.75\textwidth]{figures/state_map_immediate.pdf}
+    \caption{Cross-state real-wage effects in the immediate AI scenario.}
+    \label{fig:map}
+\end{figure}
+
+Overall, the exercise should be interpreted as a compact CDP-style application rather than a
+full structural study of AI. Its value is that it delivers a coherent dynamic counterfactual
+with explicit timing, validated baseline mechanics, and a reproducible submission package.
