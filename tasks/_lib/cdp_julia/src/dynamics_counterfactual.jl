@@ -185,7 +185,8 @@ function run_counterfactual_4sector(base::BaseState4, params::ModelParams;
                                     workspace::Union{Nothing, CounterfactualWorkspace4} = nothing,
                                     profile_override::Union{Nothing, Symbol} = nothing,
                                     trace_path::Union{Nothing, AbstractString} = nothing,
-                                    shock_name::AbstractString = "identity")
+                                    shock_name::AbstractString = "identity",
+                                    confirm_fixed_point::Bool = true)
     J, N, R = base.dims.J, base.dims.N, base.dims.R
     RJ = R * J
 
@@ -271,7 +272,10 @@ function run_counterfactual_4sector(base::BaseState4, params::ModelParams;
             trace_path,
         )
 
-        if Ymax <= params.tol_dynamic
+        if Ymax <= params.tol_dynamic && !confirm_fixed_point
+            converged = true
+            break
+        elseif Ymax <= params.tol_dynamic
             candidate_hvect .= ws.ynew
             confirm_ymax = _counterfactual_outer_sweep!(
                 base,

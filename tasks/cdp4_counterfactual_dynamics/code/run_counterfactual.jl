@@ -90,10 +90,12 @@ threads_static = _env_bool("THREADS_STATIC", false)
 profile = _env_profile()
 warm_start_static = _env_optional_bool("WARM_START_STATIC")
 use_anderson = _env_optional_bool("USE_ANDERSON")
+confirm_fixed_point = _env_optional_bool("CONFIRM_FIXED_POINT")
 hvect_relax = parse(Float64, get(ENV, "HVECT_RELAX", "0.5"))
 record_trace = _env_bool("RECORD_TRACE", true)
 config_tag = get(ENV, "CONFIG_TAG", "default")
 shock_name = get(ENV, "SHOCK_NAME", get(ENV, "SHOCK_INPUT_MODE", "identity"))
+confirm_fixed_point = isnothing(confirm_fixed_point) ? true : confirm_fixed_point
 
 baseline_anchor_file = get(ENV, "BASELINE_ANCHOR_FILE", "../input/baseline_4sector_path_reference.jld2")
 baseline_anchor_y = load_baseline_anchor_y(baseline_anchor_file)
@@ -125,6 +127,7 @@ run_stats = @timed run_counterfactual_4sector(
     profile_override = profile,
     trace_path = trace_path,
     shock_name = shock_name,
+    confirm_fixed_point = confirm_fixed_point,
 )
 path = run_stats.value
 

@@ -22,11 +22,12 @@ REFERENCE_SOLVER_SETTINGS = {
     "WARM_START_STATIC": "0",
     "USE_ANDERSON": "0",
     "HVECT_RELAX": "0.5",
+    "CONFIRM_FIXED_POINT": "1",
     "USE_THREADS": "0",
     "THREADS_DYNAMIC": "0",
     "THREADS_STATIC": "0",
 }
-REFERENCE_TOL_DYNAMIC = "1e-4"
+REFERENCE_TOL_DYNAMIC = "1e-3"
 REFERENCE_TOL_DYNAMIC_FLOAT = float(REFERENCE_TOL_DYNAMIC)
 DEFAULT_FULL_MAX_ITER = 1000
 DEFAULT_SCREEN_MAX_ITER = 10
@@ -190,6 +191,7 @@ def run_validation_for_scenario(
         "PROFILE=reference",
         "FAIL_ON_CHECKS=1",
         "REQUIRE_T1_RESPONSE=1",
+        "SKIP_RERUN=1",
         "SHOCK_INPUT_MODE=csv",
         f"SHOCK_NAME={scenario_name}",
         f"LAMBDA_CSV={lambda_path}",

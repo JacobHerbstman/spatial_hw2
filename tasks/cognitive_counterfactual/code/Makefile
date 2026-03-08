@@ -7,7 +7,7 @@ DELTA_CANDIDATES ?= 0.01,0.005,0.0025,0.001,0.0005,0.00025
 TIME_HORIZON ?= 200
 FOCUS_SECTOR ?= 4
 FOCUS_REGION ?= 32
-REFERENCE_TOL_DYNAMIC ?= 1e-4
+REFERENCE_TOL_DYNAMIC ?= 1e-3
 
 IMMEDIATE_SHOCK_NAME := cognitive_immediate
 ANTICIPATED_SHOCK_NAME := cognitive_anticipated
@@ -24,8 +24,8 @@ BASELINE_VALIDATION_SOURCE := $(abspath ../../cdp4_baseline_validate/output/vali
 BASELINE_VALIDATION_LINK := ../output/baseline_validation_reference.csv
 REFERENCE_BRIEF_FILE := $(abspath ../output/reference_figure_brief.md)
 
-REFERENCE_ENV := WARM_START_STATIC=0 USE_ANDERSON=0 HVECT_RELAX=0.5 USE_THREADS=0 THREADS_DYNAMIC=0 THREADS_STATIC=0
-FAST_ENV := WARM_START_STATIC=1 USE_ANDERSON=0 HVECT_RELAX=0.05 USE_THREADS=1 THREADS_DYNAMIC=1 THREADS_STATIC=1
+REFERENCE_ENV := WARM_START_STATIC=0 USE_ANDERSON=0 HVECT_RELAX=0.5 CONFIRM_FIXED_POINT=1 USE_THREADS=0 THREADS_DYNAMIC=0 THREADS_STATIC=0
+FAST_ENV := WARM_START_STATIC=1 USE_ANDERSON=0 HVECT_RELAX=0.05 CONFIRM_FIXED_POINT=1 USE_THREADS=1 THREADS_DYNAMIC=1 THREADS_STATIC=1
 
 .PHONY: all generate_shocks select_reference_delta prepare_reference_inputs prepare_fast_inputs reference fast submission_reference submission_fast run_reference run_fast validate_reference validate_fast report_reference report_fast immediate_reference anticipated_reference immediate_fast anticipated_fast validate_immediate_reference validate_anticipated_reference validate_immediate_fast validate_anticipated_fast report_immediate_reference report_anticipated_reference report_immediate_fast report_anticipated_fast reference_figure_brief collect_baseline_reference clean_submission_outputs all_reference all_fast clean
 

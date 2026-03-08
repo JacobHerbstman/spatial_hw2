@@ -45,7 +45,11 @@ warm_start_static = strip(lowercase(get(ENV, "WARM_START_STATIC", "")))
 warm_start_static = isempty(warm_start_static) ? nothing : (warm_start_static in ("1", "true", "yes"))
 use_anderson = strip(lowercase(get(ENV, "USE_ANDERSON", "")))
 use_anderson = isempty(use_anderson) ? nothing : (use_anderson in ("1", "true", "yes"))
+confirm_fixed_point = strip(lowercase(get(ENV, "CONFIRM_FIXED_POINT", "")))
+confirm_fixed_point = isempty(confirm_fixed_point) ? nothing : (confirm_fixed_point in ("1", "true", "yes"))
 hvect_relax = parse(Float64, get(ENV, "HVECT_RELAX", "0.5"))
+output_tag = get(ENV, "OUTPUT_TAG", String(profile))
+confirm_fixed_point = isnothing(confirm_fixed_point) ? (profile != :reference) : confirm_fixed_point
 
 report = DataFrame()
 parity_time = DataFrame()
@@ -79,6 +83,7 @@ validate_stats = @timed begin
         time_horizon = 200,
         profile_override = profile,
         trace_path = rerun_trace_path,
+        confirm_fixed_point = confirm_fixed_point,
     )
     delta = deterministic_delta(path, path_rerun)
 end
@@ -93,9 +98,9 @@ det_row = DataFrame(
 
 full_report = vcat(report, det_row)
 CSV.write("../output/validation_report_4sector.csv", full_report)
-CSV.write("../output/validation_report_4sector_$(String(profile)).csv", full_report)
+CSV.write("../output/validation_report_4sector_$(output_tag).csv", full_report)
 CSV.write("../output/parity_by_time_4sector.csv", parity_time)
-CSV.write("../output/parity_by_time_4sector_$(String(profile)).csv", parity_time)
+CSV.write("../output/parity_by_time_4sector_$(output_tag).csv", parity_time)
 
 bench = DataFrame(
     stage = ["validate"],
@@ -111,5 +116,5 @@ bench = DataFrame(
     config_tag = [config_tag],
 )
 CSV.write("../output/benchmark_validate_4sector.csv", bench)
-CSV.write("../output/benchmark_validate_4sector_$(String(profile)).csv", bench)
+CSV.write("../output/benchmark_validate_4sector_$(output_tag).csv", bench)
 println("Wrote validation report to ../output/validation_report_4sector.csv")

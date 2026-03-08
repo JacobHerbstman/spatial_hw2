@@ -1,6 +1,6 @@
 SHELL := bash
 
-.PHONY: all tasks paper reference fast setup baseline_solver baseline_reference baseline_fast baseline_smoke baseline_validate_reference baseline_validate_fast baseline_validate_smoke counterfactual_identity_reference counterfactual_identity_fast counterfactual_toy_reference counterfactual_toy_fast counterfactual_validate_identity_reference counterfactual_validate_identity_fast counterfactual_validate_toy_reference counterfactual_validate_toy_fast ai_reference ai_fast diagnostic check clean
+.PHONY: all tasks paper reference fast setup baseline_solver baseline_reference baseline_strict_debug baseline_fast baseline_smoke baseline_validate_reference baseline_validate_strict_debug baseline_validate_fast baseline_validate_smoke counterfactual_identity_reference counterfactual_identity_fast counterfactual_toy_reference counterfactual_toy_fast counterfactual_validate_identity_reference counterfactual_validate_identity_fast counterfactual_validate_toy_reference counterfactual_validate_toy_fast ai_reference ai_fast diagnostic check clean
 
 all: paper
 
@@ -22,6 +22,9 @@ baseline_solver:
 baseline_reference:
 	$(MAKE) -C tasks/cdp4_baseline_dynamics/code replication_reference
 
+baseline_strict_debug:
+	$(MAKE) -C tasks/cdp4_baseline_dynamics/code strict_debug
+
 baseline_fast:
 	$(MAKE) -C tasks/cdp4_baseline_dynamics/code replication_fast
 
@@ -30,6 +33,9 @@ baseline_smoke:
 
 baseline_validate_reference:
 	$(MAKE) -C tasks/cdp4_baseline_validate/code replication_reference
+
+baseline_validate_strict_debug:
+	$(MAKE) -C tasks/cdp4_baseline_validate/code strict_debug
 
 baseline_validate_fast:
 	$(MAKE) -C tasks/cdp4_baseline_validate/code replication_fast
@@ -81,6 +87,8 @@ check:
 	@echo "  make fast"
 	@echo "Regression-only build:"
 	@echo "  make tasks"
+	@echo "Strict baseline debug:"
+	@echo "  make baseline_strict_debug baseline_validate_strict_debug"
 	@echo "MATLAB-faithful diagnostic:"
 	@echo "  make diagnostic"
 

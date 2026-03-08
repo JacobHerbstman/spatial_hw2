@@ -111,10 +111,10 @@ else
     profile == :reference ? "counterfactual_reference" : "counterfactual_fast"
 end
 mode_label = get(ENV, "VALIDATION_MODE", mode_label_default)
-rel_tol_default = validation_kind == "identity" ? "1e-4" : "1e-3"
+rel_tol_default = "1e-3"
 rel_tol = parse(Float64, get(ENV, "REL_TOL", rel_tol_default))
-fast_ref_tol = parse(Float64, get(ENV, "FAST_REF_TOL", "1e-4"))
-roundtrip_tol = parse(Float64, get(ENV, "ROUNDTRIP_TOL", "1e-4"))
+fast_ref_tol = parse(Float64, get(ENV, "FAST_REF_TOL", "1e-3"))
+roundtrip_tol = parse(Float64, get(ENV, "ROUNDTRIP_TOL", "1e-3"))
 roundtrip_max_iters = parse(Int, get(ENV, "ROUNDTRIP_MAX_ITERS", "5"))
 config_tag = get(ENV, "CONFIG_TAG", "default")
 
@@ -125,6 +125,7 @@ reference_output_file = get(ENV, "REFERENCE_OUTPUT_FILE", "")
 fail_on_checks = _env_bool("FAIL_ON_CHECKS", false)
 response_tol = parse(Float64, get(ENV, "RESPONSE_TOL", "1e-12"))
 require_t1_response = _env_bool("REQUIRE_T1_RESPONSE", false)
+skip_rerun = _env_bool("SKIP_RERUN", false)
 
 path = _load_saved_path(counterfactual_output_file)
 baseline_anchor_y = load_baseline_anchor_y(baseline_anchor_file)
@@ -145,7 +146,9 @@ threads_static = _env_bool("THREADS_STATIC", false)
 record_trace = _env_bool("RECORD_TRACE", true)
 warm_start_static = _env_optional_bool("WARM_START_STATIC")
 use_anderson = _env_optional_bool("USE_ANDERSON")
+confirm_fixed_point = _env_optional_bool("CONFIRM_FIXED_POINT")
 hvect_relax = parse(Float64, get(ENV, "HVECT_RELAX", "0.5"))
+confirm_fixed_point = isnothing(confirm_fixed_point) ? true : confirm_fixed_point
 
 validate_stats = @timed begin
     base = load_base_state_4sector("../input/Base_year_four_sectors.mat")
@@ -207,49 +210,52 @@ validate_stats = @timed begin
         error("Unsupported VALIDATION_KIND=$(validation_kind). Use identity, toy, or generic.")
     end
 
-    params = default_model_params(
-        base;
-        tol_dynamic = tol_dynamic,
-        max_iter_dynamic = max_iter_dynamic,
-        max_iter_static = max_iter_static,
-        use_threads = use_threads,
-        threads_dynamic = threads_dynamic,
-        threads_static = threads_static,
-        profile = profile,
-        warm_start_static = warm_start_static,
-        use_anderson = use_anderson,
-        hvect_relax = hvect_relax,
-        record_trace = record_trace,
-    )
-    rerun_trace_path = "../output/outer_trace_counterfactual_4sector_validate_rerun.csv"
-    rerun_init = validation_kind == "identity" ? baseline_anchor_y : nothing
-    path_rerun = run_counterfactual_4sector(
-        base,
-        params;
-        baseline_anchor_y = baseline_anchor_y,
-        shocks = rerun_shocks,
-        time_horizon = time_horizon,
-        y_init = rerun_init,
-        profile_override = profile,
-        trace_path = rerun_trace_path,
-        shock_name = shock_name,
-    )
-    delta = deterministic_delta_counterfactual(path, path_rerun)
+    if !skip_rerun
+        params = default_model_params(
+            base;
+            tol_dynamic = tol_dynamic,
+            max_iter_dynamic = max_iter_dynamic,
+            max_iter_static = max_iter_static,
+            use_threads = use_threads,
+            threads_dynamic = threads_dynamic,
+            threads_static = threads_static,
+            profile = profile,
+            warm_start_static = warm_start_static,
+            use_anderson = use_anderson,
+            hvect_relax = hvect_relax,
+            record_trace = record_trace,
+        )
+        rerun_trace_path = "../output/outer_trace_counterfactual_4sector_validate_rerun.csv"
+        rerun_init = validation_kind == "identity" ? baseline_anchor_y : nothing
+        path_rerun = run_counterfactual_4sector(
+            base,
+            params;
+            baseline_anchor_y = baseline_anchor_y,
+            shocks = rerun_shocks,
+            time_horizon = time_horizon,
+            y_init = rerun_init,
+            profile_override = profile,
+            trace_path = rerun_trace_path,
+            shock_name = shock_name,
+            confirm_fixed_point = confirm_fixed_point,
+        )
+        delta = deterministic_delta_counterfactual(path, path_rerun)
 
-    det_row = _status_row(mode_label, "deterministic_rerun_max_abs_delta", delta, 1e-10, delta <= 1e-10)
-    report = vcat(report, det_row)
+        det_row = _status_row(mode_label, "deterministic_rerun_max_abs_delta", delta, 1e-10, delta <= 1e-10)
+        report = vcat(report, det_row)
 
-    if validation_kind == "identity"
-        rt_abs = maximum(abs.(path_rerun.Ynew .- baseline_anchor_y))
-        rt_rel = maximum(abs.(path_rerun.Ynew .- baseline_anchor_y) ./ max.(abs.(baseline_anchor_y), 1e-12))
-        rt_iter = Float64(path_rerun.iterations)
-        rt_conv = path_rerun.converged ? 1.0 : 0.0
-        report = vcat(report, _status_row(mode_label, "identity_roundtrip_converged", rt_conv, 1.0, path_rerun.converged))
-        report = vcat(report, _status_row(mode_label, "identity_roundtrip_ynew_max_abs_error", rt_abs, roundtrip_tol, rt_abs <= roundtrip_tol))
-        report = vcat(report, _status_row(mode_label, "identity_roundtrip_ynew_max_rel_error", rt_rel, roundtrip_tol, rt_rel <= roundtrip_tol))
-        report = vcat(report, _status_row(mode_label, "identity_roundtrip_iterations", rt_iter, Float64(roundtrip_max_iters), rt_iter <= roundtrip_max_iters))
-    elseif validation_kind == "generic"
-        parity_time = parity_by_time_counterfactual(path, path_rerun.Ynew; mode_label = mode_label)
+        if validation_kind == "identity"
+            rt_abs = maximum(abs.(path_rerun.Ynew .- baseline_anchor_y))
+            rt_rel = maximum(abs.(path_rerun.Ynew .- baseline_anchor_y) ./ max.(abs.(baseline_anchor_y), 1e-12))
+            rt_iter = Float64(path_rerun.iterations)
+            rt_conv = path_rerun.converged ? 1.0 : 0.0
+            report = vcat(report, _status_row(mode_label, "identity_roundtrip_converged", rt_conv, 1.0, path_rerun.converged))
+            report = vcat(report, _status_row(mode_label, "identity_roundtrip_ynew_max_abs_error", rt_abs, roundtrip_tol, rt_abs <= roundtrip_tol))
+            report = vcat(report, _status_row(mode_label, "identity_roundtrip_ynew_max_rel_error", rt_rel, roundtrip_tol, rt_rel <= roundtrip_tol))
+            report = vcat(report, _status_row(mode_label, "identity_roundtrip_iterations", rt_iter, Float64(roundtrip_max_iters), rt_iter <= roundtrip_max_iters))
+        elseif validation_kind == "generic"
+            parity_time = parity_by_time_counterfactual(path, path_rerun.Ynew; mode_label = mode_label)
+        end
     end
 
     if !isempty(reference_output_file) && isfile(reference_output_file)

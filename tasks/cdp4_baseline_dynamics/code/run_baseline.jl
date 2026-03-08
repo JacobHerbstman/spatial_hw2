@@ -41,9 +41,12 @@ threads_static = _env_bool("THREADS_STATIC", false)
 profile = _env_profile()
 warm_start_static = _env_optional_bool("WARM_START_STATIC")
 use_anderson = _env_optional_bool("USE_ANDERSON")
+confirm_fixed_point = _env_optional_bool("CONFIRM_FIXED_POINT")
 hvect_relax = parse(Float64, get(ENV, "HVECT_RELAX", "0.5"))
 record_trace = _env_bool("RECORD_TRACE", true)
 config_tag = get(ENV, "CONFIG_TAG", "default")
+output_tag = get(ENV, "OUTPUT_TAG", String(profile))
+confirm_fixed_point = isnothing(confirm_fixed_point) ? (profile != :reference) : confirm_fixed_point
 params = default_model_params(
     base;
     tol_dynamic = tol_dynamic,
@@ -66,12 +69,13 @@ run_stats = @timed run_baseline_4sector(
     time_horizon = 200,
     profile_override = profile,
     trace_path = trace_path,
+    confirm_fixed_point = confirm_fixed_point,
 )
 path = run_stats.value
 profile_tag = String(profile)
 
 @save "../output/baseline_4sector_path.jld2" path
-@save "../output/baseline_4sector_path_$(profile_tag).jld2" path
+@save "../output/baseline_4sector_path_$(output_tag).jld2" path
 
 summary = DataFrame(
     metric = [
@@ -99,7 +103,7 @@ summary = DataFrame(
 )
 
 CSV.write("../output/summary_4sector.csv", summary)
-CSV.write("../output/summary_4sector_$(profile_tag).csv", summary)
+CSV.write("../output/summary_4sector_$(output_tag).csv", summary)
 
 bench = DataFrame(
     stage = ["baseline_dynamics"],
@@ -114,8 +118,8 @@ bench = DataFrame(
     config_tag = [config_tag],
 )
 CSV.write("../output/benchmark_4sector.csv", bench)
-CSV.write("../output/benchmark_4sector_$(profile_tag).csv", bench)
+CSV.write("../output/benchmark_4sector_$(output_tag).csv", bench)
 if isfile(trace_path)
-    cp(trace_path, "../output/outer_trace_4sector_$(profile_tag).csv"; force = true)
+    cp(trace_path, "../output/outer_trace_4sector_$(output_tag).csv"; force = true)
 end
 println("Wrote baseline dynamic outputs to ../output")

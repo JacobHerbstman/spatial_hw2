@@ -373,7 +373,8 @@ function run_baseline_4sector(base::BaseState4, params::ModelParams; time_horizo
                               y_init::Union{Nothing, Matrix{Float64}} = nothing,
                               workspace::Union{Nothing, BaselineWorkspace4} = nothing,
                               profile_override::Union{Nothing, Symbol} = nothing,
-                              trace_path::Union{Nothing, AbstractString} = nothing)
+                              trace_path::Union{Nothing, AbstractString} = nothing,
+                              confirm_fixed_point::Bool = true)
     J, N, R = base.dims.J, base.dims.N, base.dims.R
     RJ = R * J
     profile = _run_profile(params, profile_override)
@@ -450,7 +451,10 @@ function run_baseline_4sector(base::BaseState4, params::ModelParams; time_horizo
             trace_path,
         )
 
-        if Ymax <= params.tol_dynamic
+        if Ymax <= params.tol_dynamic && !confirm_fixed_point
+            converged = true
+            break
+        elseif Ymax <= params.tol_dynamic
             candidate_hvect .= ws.ynew
             confirm_ymax = _baseline_outer_sweep!(
                 base,
